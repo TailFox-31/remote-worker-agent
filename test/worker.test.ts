@@ -95,6 +95,7 @@ describe('RemoteWorkerAgent', () => {
     const workspaceRoot = path.join(tempDir, 'workspaces');
     const config = createConfig(sessionStorePath, workspaceRoot);
     const sessionStore = new JsonSessionStore(sessionStorePath);
+    const startAttempt = vi.fn(async () => ({ status: 'running' }));
     const completeAttempt = vi.fn(async () => ({ job_status: 'completed' }));
     const uploadArtifact = vi.fn(async () => ({ artifact_id: 'artifact-1' }));
     const heartbeatAttempt = vi.fn(
@@ -120,7 +121,7 @@ describe('RemoteWorkerAgent', () => {
           drain_requested: false
         })),
         claimJob: vi.fn(async () => createClaim()),
-        startAttempt: vi.fn(async () => ({ status: 'running' })),
+        startAttempt,
         heartbeatAttempt,
         completeAttempt,
         failAttempt: vi.fn(async () => ({ job_status: 'failed' })),
@@ -137,6 +138,12 @@ describe('RemoteWorkerAgent', () => {
     expect(result).toMatchObject({
       status: 'completed',
       jobId: 'job-1'
+    });
+    expect(startAttempt).toHaveBeenCalledWith('attempt-1', 'lease-1', {
+      worker_id: 'worker-a',
+      provider: 'codex',
+      opaque_session_id: 'codex:job-1',
+      session_reused: false
     });
     expect(completeAttempt).toHaveBeenCalledTimes(1);
     expect(uploadArtifact).toHaveBeenCalledTimes(1);
@@ -195,5 +202,57 @@ describe('RemoteWorkerAgent', () => {
       jobId: 'job-1'
     });
     expect(cancelAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails the attempt instead of crashing when startAttempt throws', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-start-fail-'));
+    const sessionStorePath = path.join(tempDir, 'sessions.json');
+    const workspaceRoot = path.join(tempDir, 'workspaces');
+    const config = createConfig(sessionStorePath, workspaceRoot);
+    const failAttempt = vi.fn(async () => ({ job_status: 'failed' }));
+
+    const agent = new RemoteWorkerAgent(config, {
+      client: {
+        registerWorker: vi.fn(async () => ({
+          worker_id: 'worker-a',
+          status: 'idle',
+          heartbeat_interval_sec: 15,
+          lease_ttl_sec: 45
+        })),
+        heartbeatWorker: vi.fn(async () => ({
+          accepted: true,
+          server_time: '2026-04-07T00:00:00Z',
+          next_heartbeat_sec: 15,
+          drain_requested: false
+        })),
+        claimJob: vi.fn(async () => createClaim()),
+        startAttempt: vi.fn(async () => {
+          throw new Error('start failed');
+        }),
+        heartbeatAttempt: vi.fn(
+          async (): Promise<AttemptHeartbeatResponse> => ({
+            accepted: true,
+            lease_expires_at: '2026-04-07T00:00:30Z',
+            cancel_requested: false
+          })
+        ),
+        completeAttempt: vi.fn(async () => ({ job_status: 'completed' })),
+        failAttempt,
+        cancelAttempt: vi.fn(async () => ({ job_status: 'cancelled' })),
+        uploadArtifact: vi.fn(async () => ({ artifact_id: 'artifact-1' }))
+      },
+      sessionStore: new JsonSessionStore(sessionStorePath),
+      workspacePreparer: new StubWorkspacePreparer(workspaceRoot),
+      executors: new Map([['codex', new FakeExecutor()]])
+    });
+
+    const result = await agent.runCycle();
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      jobId: 'job-1',
+      detail: 'start failed'
+    });
+    expect(failAttempt).toHaveBeenCalledTimes(1);
   });
 });

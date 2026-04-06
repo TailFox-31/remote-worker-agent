@@ -99,17 +99,19 @@ export class RemoteWorkerAgent {
     const resumeSession = await this.resolveSessionResume(claim, provider);
     const attemptId = claim.attempt.attempt_id;
     const leaseToken = claim.attempt.lease_token;
-
-    await this.deps.client.startAttempt(attemptId, leaseToken, {
-      worker_id: this.config.workerId,
-      provider,
-      opaque_session_id: resumeSession?.opaque_session_id,
-      session_reused: Boolean(resumeSession)
-    });
+    const opaqueSessionId =
+      resumeSession?.opaque_session_id ?? `${provider}:${claim.job.job_id}`;
 
     let preparedWorkspace: PreparedWorkspace | null = null;
 
     try {
+      await this.deps.client.startAttempt(attemptId, leaseToken, {
+        worker_id: this.config.workerId,
+        provider,
+        opaque_session_id: opaqueSessionId,
+        session_reused: Boolean(resumeSession)
+      });
+
       const workspaceHeartbeat = await this.deps.client.heartbeatAttempt(attemptId, leaseToken, {
         worker_id: this.config.workerId,
         progress_phase: 'prepare_workspace',
