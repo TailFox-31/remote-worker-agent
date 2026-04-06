@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -15,6 +16,11 @@ export interface WorkerConfig {
   pollIntervalMs: number;
   workspaceRoot: string;
   sessionStorePath: string;
+}
+
+export interface LoadConfigOptions {
+  cwd?: string;
+  envFilePath?: string;
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, key: string): string {
@@ -51,30 +57,78 @@ function parseProvider(raw: string | undefined): SessionProvider {
   throw new Error(`Unsupported provider: ${raw}`);
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
-  const controlPlaneBaseUrl = requireEnv(env, 'CONTROL_PLANE_BASE_URL').replace(/\/+$/, '');
-  const controlPlaneToken = requireEnv(env, 'CONTROL_PLANE_TOKEN');
-  const workerId = requireEnv(env, 'WORKER_ID');
+function parseDotEnv(content: string): NodeJS.ProcessEnv {
+  const parsed: NodeJS.ProcessEnv = {};
 
-  const workspaceRoot = path.resolve(env.WORKER_WORKSPACE_ROOT ?? '.workspaces');
-  const sessionStorePath = path.resolve(env.WORKER_SESSION_STORE ?? '.sessions/store.json');
-  const capabilities = (env.WORKER_CAPABILITIES ?? '')
+  for (const rawLine of content.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const normalizedLine = line.startsWith('export ') ? line.slice('export '.length) : line;
+    const separatorIndex = normalizedLine.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = normalizedLine.slice(0, separatorIndex).trim();
+    let value = normalizedLine.slice(separatorIndex + 1).trim();
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    parsed[key] = value;
+  }
+
+  return parsed;
+}
+
+function loadDotEnvFile(envFilePath: string): NodeJS.ProcessEnv {
+  if (!fs.existsSync(envFilePath)) {
+    return {};
+  }
+
+  return parseDotEnv(fs.readFileSync(envFilePath, 'utf8'));
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  options: LoadConfigOptions = {}
+): WorkerConfig {
+  const envFilePath = options.envFilePath ?? path.resolve(options.cwd ?? process.cwd(), '.env');
+  const mergedEnv: NodeJS.ProcessEnv = {
+    ...loadDotEnvFile(envFilePath),
+    ...env
+  };
+
+  const controlPlaneBaseUrl = requireEnv(mergedEnv, 'CONTROL_PLANE_BASE_URL').replace(/\/+$/, '');
+  const controlPlaneToken = requireEnv(mergedEnv, 'CONTROL_PLANE_TOKEN');
+  const workerId = requireEnv(mergedEnv, 'WORKER_ID');
+
+  const workspaceRoot = path.resolve(mergedEnv.WORKER_WORKSPACE_ROOT ?? '.workspaces');
+  const sessionStorePath = path.resolve(mergedEnv.WORKER_SESSION_STORE ?? '.sessions/store.json');
+  const capabilities = (mergedEnv.WORKER_CAPABILITIES ?? '')
     .split(',')
     .map((token) => token.trim())
     .filter(Boolean);
 
-  const executionMode = env.WORKER_EXECUTION_MODE === 'strict' ? 'strict' : 'dry-run';
+  const executionMode = mergedEnv.WORKER_EXECUTION_MODE === 'strict' ? 'strict' : 'dry-run';
 
   return {
     controlPlaneBaseUrl,
     controlPlaneToken,
     workerId,
-    displayName: env.WORKER_DISPLAY_NAME ?? workerId,
+    displayName: mergedEnv.WORKER_DISPLAY_NAME ?? workerId,
     capabilities,
-    maxConcurrency: parsePositiveInteger(env.WORKER_MAX_CONCURRENCY, 1),
-    defaultProvider: parseProvider(env.WORKER_DEFAULT_PROVIDER),
+    maxConcurrency: parsePositiveInteger(mergedEnv.WORKER_MAX_CONCURRENCY, 1),
+    defaultProvider: parseProvider(mergedEnv.WORKER_DEFAULT_PROVIDER),
     executionMode,
-    pollIntervalMs: parsePositiveInteger(env.WORKER_POLL_INTERVAL_MS, 5000),
+    pollIntervalMs: parsePositiveInteger(mergedEnv.WORKER_POLL_INTERVAL_MS, 5000),
     workspaceRoot,
     sessionStorePath
   };

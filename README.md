@@ -25,6 +25,12 @@
 npm install
 ```
 
+환경 파일 준비:
+
+```bash
+cp .env.example .env
+```
+
 1회 실행:
 
 ```bash
@@ -38,6 +44,9 @@ npm run start
 ```
 
 ## 환경 변수
+
+- repo 루트의 `.env`는 자동 로드됩니다
+- 셸에서 직접 넣은 환경변수가 `.env`보다 우선합니다
 
 - `CONTROL_PLANE_BASE_URL` 예: `http://127.0.0.1:8787`
 - `CONTROL_PLANE_TOKEN` Bearer token
