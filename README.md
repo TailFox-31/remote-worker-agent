@@ -6,14 +6,13 @@
 
 - worker 등록 / heartbeat / claim / start / complete / fail / cancelled
 - file-based session reuse 저장소
-- repo/workspace 준비 스텁
+- `git clone/fetch + worktree` 기반 workspace 준비
 - `codex`, `claude-code` 실행기 어댑터 골격
 - 기본 테스트
 
 아직 포함하지 않은 것:
 
 - 실제 AI CLI 연동
-- 실 Git clone/worktree 전략 확정
 - 장시간 실행 중 주기 heartbeat 루프 세분화
 - artifact 외부 저장소 업로드
 
@@ -67,6 +66,7 @@ npm run start
 - `WORKER_EXECUTION_MODE` `dry-run | strict`, 기본 `dry-run`
 - `WORKER_POLL_INTERVAL_MS` 기본 `5000`
 - `WORKER_WORKSPACE_ROOT` 기본 `.workspaces`
+  - 내부적으로 `.repo-cache/`에 원격 repo 캐시를 두고, job별 worktree를 생성합니다
 - `WORKER_SESSION_STORE` 기본 `.sessions/store.json`
 
 ## 구조
