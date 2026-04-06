@@ -45,9 +45,15 @@ async function writeManifest(manifestPath: string, job: RemoteWorkerJob): Promis
   );
 }
 
-async function runGit(args: string[], cwd: string): Promise<string> {
+async function runGit(args: string[], cwd: string, gitEnv: NodeJS.ProcessEnv = {}): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', args, { cwd });
+    const { stdout } = await execFileAsync('git', args, {
+      cwd,
+      env: {
+        ...process.env,
+        ...gitEnv
+      }
+    });
     return stdout.trim();
   } catch (error) {
     const execError = error as NodeJS.ErrnoException & {
@@ -85,7 +91,10 @@ export class StubWorkspacePreparer implements WorkspacePreparer {
 }
 
 export class GitWorkspacePreparer implements WorkspacePreparer {
-  constructor(private readonly rootPath: string) {}
+  constructor(
+    private readonly rootPath: string,
+    private readonly gitEnv: NodeJS.ProcessEnv = {}
+  ) {}
 
   async prepare(job: RemoteWorkerJob): Promise<PreparedWorkspace> {
     await mkdir(this.rootPath, { recursive: true });
@@ -109,25 +118,27 @@ export class GitWorkspacePreparer implements WorkspacePreparer {
 
   private async ensureRepoCache(repoCachePath: string, repoUrl: string): Promise<void> {
     if (fs.existsSync(repoCachePath)) {
-      await runGit(['remote', 'set-url', 'origin', repoUrl], repoCachePath);
+      await runGit(['remote', 'set-url', 'origin', repoUrl], repoCachePath, this.gitEnv);
       return;
     }
 
     await mkdir(path.dirname(repoCachePath), { recursive: true });
-    await runGit(['clone', '--no-checkout', repoUrl, repoCachePath], this.rootPath);
+    await runGit(['clone', '--no-checkout', repoUrl, repoCachePath], this.rootPath, this.gitEnv);
   }
 
   private async refreshRepoCache(repoCachePath: string, job: RemoteWorkerJob): Promise<void> {
-    await runGit(['fetch', '--prune', 'origin'], repoCachePath);
-    await runGit(['rev-parse', '--verify', `${job.base_commit}^{commit}`], repoCachePath);
+    await runGit(['fetch', '--prune', 'origin'], repoCachePath, this.gitEnv);
+    await runGit(['worktree', 'prune', '--expire', 'now'], repoCachePath, this.gitEnv);
+    await runGit(['rev-parse', '--verify', `${job.base_commit}^{commit}`], repoCachePath, this.gitEnv);
   }
 
   private async resetWorkspace(repoCachePath: string, workspacePath: string): Promise<void> {
     try {
-      await runGit(['worktree', 'remove', '--force', workspacePath], repoCachePath);
+      await runGit(['worktree', 'remove', '--force', workspacePath], repoCachePath, this.gitEnv);
     } catch {
       /* ignore */
     }
     await rm(workspacePath, { recursive: true, force: true });
+    await runGit(['worktree', 'prune', '--expire', 'now'], repoCachePath, this.gitEnv);
   }
 }

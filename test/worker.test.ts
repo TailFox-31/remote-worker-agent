@@ -23,7 +23,8 @@ function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerCo
     executionMode: 'dry-run',
     pollIntervalMs: 10,
     workspaceRoot,
-    sessionStorePath
+    sessionStorePath,
+    gitEnv: {}
   };
 }
 

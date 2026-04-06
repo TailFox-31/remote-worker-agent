@@ -68,6 +68,8 @@ npm run start
 - `WORKER_WORKSPACE_ROOT` 기본 `.workspaces`
   - 내부적으로 `.repo-cache/`에 원격 repo 캐시를 두고, job별 worktree를 생성합니다
 - `WORKER_SESSION_STORE` 기본 `.sessions/store.json`
+- private repo 인증이 필요하면 `WORKER_GIT_SSH_COMMAND`, `WORKER_GIT_ASKPASS`, `WORKER_GIT_TERMINAL_PROMPT`, `WORKER_SSH_AUTH_SOCK`를 `.env`에 둘 수 있습니다
+- `base_commit`은 원격 repo에서 fetch 가능한 커밋이어야 합니다
 
 ## 구조
 

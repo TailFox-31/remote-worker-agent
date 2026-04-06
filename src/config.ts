@@ -16,6 +16,7 @@ export interface WorkerConfig {
   pollIntervalMs: number;
   workspaceRoot: string;
   sessionStorePath: string;
+  gitEnv: NodeJS.ProcessEnv;
 }
 
 export interface LoadConfigOptions {
@@ -96,6 +97,29 @@ function loadDotEnvFile(envFilePath: string): NodeJS.ProcessEnv {
   return parseDotEnv(fs.readFileSync(envFilePath, 'utf8'));
 }
 
+function pickGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const gitEnv: NodeJS.ProcessEnv = {};
+  const mappings: Array<[source: string, target: string]> = [
+    ['WORKER_GIT_SSH_COMMAND', 'GIT_SSH_COMMAND'],
+    ['WORKER_GIT_ASKPASS', 'GIT_ASKPASS'],
+    ['WORKER_GIT_TERMINAL_PROMPT', 'GIT_TERMINAL_PROMPT'],
+    ['WORKER_SSH_AUTH_SOCK', 'SSH_AUTH_SOCK'],
+    ['GIT_SSH_COMMAND', 'GIT_SSH_COMMAND'],
+    ['GIT_ASKPASS', 'GIT_ASKPASS'],
+    ['GIT_TERMINAL_PROMPT', 'GIT_TERMINAL_PROMPT'],
+    ['SSH_AUTH_SOCK', 'SSH_AUTH_SOCK']
+  ];
+
+  for (const [sourceKey, targetKey] of mappings) {
+    const value = env[sourceKey];
+    if (value && !gitEnv[targetKey]) {
+      gitEnv[targetKey] = value;
+    }
+  }
+
+  return gitEnv;
+}
+
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
   options: LoadConfigOptions = {}
@@ -130,6 +154,7 @@ export function loadConfig(
     executionMode,
     pollIntervalMs: parsePositiveInteger(mergedEnv.WORKER_POLL_INTERVAL_MS, 5000),
     workspaceRoot,
-    sessionStorePath
+    sessionStorePath,
+    gitEnv: pickGitEnv(mergedEnv)
   };
 }

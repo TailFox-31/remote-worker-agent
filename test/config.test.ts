@@ -37,6 +37,7 @@ describe('loadConfig', () => {
       defaultProvider: 'codex',
       executionMode: 'strict'
     });
+    expect(config.gitEnv).toEqual({});
   });
 
   it('lets explicit process env override .env values', async () => {
@@ -63,5 +64,28 @@ describe('loadConfig', () => {
     expect(config.controlPlaneToken).toBe('shell-token');
     expect(config.workerId).toBe('shell-worker');
     expect(config.controlPlaneBaseUrl).toBe('http://127.0.0.1:8787');
+  });
+
+  it('maps worker-scoped git auth variables into git environment', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-config-git-env-'));
+
+    await writeFile(
+      path.join(tempDir, '.env'),
+      [
+        'CONTROL_PLANE_BASE_URL=http://127.0.0.1:8787',
+        'CONTROL_PLANE_TOKEN=file-token',
+        'WORKER_ID=file-worker',
+        'WORKER_GIT_SSH_COMMAND=ssh -i C:/Users/test/.ssh/id_ed25519 -o IdentitiesOnly=yes',
+        'WORKER_GIT_TERMINAL_PROMPT=0'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const config = loadConfig({} as NodeJS.ProcessEnv, { cwd: tempDir });
+
+    expect(config.gitEnv).toEqual({
+      GIT_SSH_COMMAND: 'ssh -i C:/Users/test/.ssh/id_ed25519 -o IdentitiesOnly=yes',
+      GIT_TERMINAL_PROMPT: '0'
+    });
   });
 });

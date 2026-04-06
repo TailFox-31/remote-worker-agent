@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const client = new ControlPlaneClient(config.controlPlaneBaseUrl, config.controlPlaneToken);
   const sessionStore = new JsonSessionStore(config.sessionStorePath);
-  const workspacePreparer = new GitWorkspacePreparer(config.workspaceRoot);
+  const workspacePreparer = new GitWorkspacePreparer(config.workspaceRoot, config.gitEnv);
   const executors = new Map([
     ['codex', new CodexExecutor(config.executionMode)],
     ['claude-code', new ClaudeCodeExecutor(config.executionMode)]
