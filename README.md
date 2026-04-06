@@ -37,6 +37,15 @@ cp .env.example .env
 npm run start:once
 ```
 
+예상 출력:
+
+```text
+idle
+completed job=job_123 summary="Applied requested changes"
+failed job=job_123 reason="Control plane request failed with status 401"
+cancelled job=job_123 reason="Cancelled by control plane"
+```
+
 루프 실행:
 
 ```bash

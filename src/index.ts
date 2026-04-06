@@ -2,6 +2,7 @@ import { loadConfig } from './config.js';
 import { ControlPlaneClient } from './control-plane-client.js';
 import { ClaudeCodeExecutor } from './executors/claude-code.js';
 import { CodexExecutor } from './executors/codex.js';
+import { formatCycleResult } from './output.js';
 import { StubWorkspacePreparer } from './repo-workspace.js';
 import { JsonSessionStore } from './session-store.js';
 import { RemoteWorkerAgent } from './worker.js';
@@ -26,7 +27,8 @@ async function main(): Promise<void> {
   await agent.register();
 
   if (process.argv.includes('--once')) {
-    await agent.runCycle();
+    const result = await agent.runCycle();
+    console.log(formatCycleResult(result));
     return;
   }
 
@@ -35,7 +37,9 @@ async function main(): Promise<void> {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
-  await agent.runLoop(controller.signal);
+  await agent.runLoop(controller.signal, (result) => {
+    console.log(formatCycleResult(result));
+  });
 }
 
 main().catch((error) => {

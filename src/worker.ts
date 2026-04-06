@@ -73,9 +73,13 @@ export class RemoteWorkerAgent {
     return this.runClaim(claim);
   }
 
-  async runLoop(signal?: AbortSignal): Promise<void> {
+  async runLoop(
+    signal?: AbortSignal,
+    onCycleResult?: (result: WorkerCycleResult) => void | Promise<void>
+  ): Promise<void> {
     while (!signal?.aborted) {
-      await this.runCycle();
+      const result = await this.runCycle();
+      await onCycleResult?.(result);
       await sleep(this.config.pollIntervalMs, undefined, { signal }).catch((error: unknown) => {
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.name !== 'AbortError') {
