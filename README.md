@@ -8,6 +8,7 @@
 - file-based session reuse 저장소
 - `git clone/fetch + worktree` 기반 workspace 준비
 - `codex` strict 실행기 연동
+- 선택적으로 `commit + push + PR 생성` publish 모드
 - `claude-code` 실행기 어댑터 골격
 - 기본 테스트
 
@@ -65,9 +66,16 @@ npm run start
 - `WORKER_DEFAULT_PROVIDER` `codex | claude-code`, 기본 `codex`
 - `WORKER_EXECUTION_MODE` `dry-run | strict`, 기본 `dry-run`
 - `WORKER_CODEX_BIN` 기본 `codex`
-- `WORKER_CODEX_MODEL` 선택, 예: `gpt-5.4-codex`
+- `WORKER_CODEX_MODEL` 선택, 예: `gpt-5.4`
 - `WORKER_CODEX_SANDBOX` 기본 `workspace-write`
 - `CODEX_HOME`, `OPENAI_API_KEY` 같은 Codex 런타임 env도 `.env`에서 그대로 전달됩니다
+- `WORKER_PUBLISH_MODE` `artifact | push | pr`, 기본 `artifact`
+- `WORKER_PUBLISH_BRANCH_PREFIX` 기본 `job`
+- `WORKER_GIT_COMMIT_NAME` 기본 `Remote Worker Agent`
+- `WORKER_GIT_COMMIT_EMAIL` 기본 `remote-worker-agent@local`
+- `WORKER_GITHUB_TOKEN` 또는 `GITHUB_TOKEN`, `GH_TOKEN`
+- `WORKER_GITHUB_API_BASE_URL` 기본 `https://api.github.com`
+- `WORKER_GITHUB_PR_DRAFT` 기본 `false`
 - `WORKER_POLL_INTERVAL_MS` 기본 `5000`
 - `WORKER_WORKSPACE_ROOT` 기본 `.workspaces`
   - 내부적으로 `.repo-cache/`에 원격 repo 캐시를 두고, job별 worktree를 생성합니다
@@ -82,7 +90,23 @@ npm run start
 - `src/session-store.ts`: session persistence
 - `src/repo-workspace.ts`: git worktree 기반 workspace 준비
 - `src/executors/codex.ts`: 실제 `codex exec` 연동
+- `src/publisher.ts`: commit / push / GitHub PR 생성
 - `src/executors/claude-code.ts`: skeleton
+
+## Publish 모드
+
+- `artifact`
+  - 현재처럼 patch/report artifact만 업로드합니다
+- `push`
+  - 성공한 변경을 `job/<job_id>` 브랜치에 commit + push 합니다
+- `pr`
+  - `push`를 수행한 뒤 GitHub API로 PR까지 생성합니다
+
+주의:
+
+- `pr` 모드는 GitHub repo URL과 `WORKER_GITHUB_TOKEN`(또는 `GITHUB_TOKEN`, `GH_TOKEN`)이 필요합니다
+- `job-manifest.json`은 publish에서 제외됩니다
+- 결과 요약과 `result_json.publish`, publish report artifact에 branch/commit/PR URL이 함께 기록됩니다
 
 ## Strict 시험 시나리오
 

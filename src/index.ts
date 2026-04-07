@@ -3,6 +3,7 @@ import { ControlPlaneClient } from './control-plane-client.js';
 import { ClaudeCodeExecutor } from './executors/claude-code.js';
 import { CodexExecutor } from './executors/codex.js';
 import { formatCycleResult } from './output.js';
+import { GitResultPublisher } from './publisher.js';
 import { GitWorkspacePreparer } from './repo-workspace.js';
 import { JsonSessionStore } from './session-store.js';
 import { RemoteWorkerAgent } from './worker.js';
@@ -12,6 +13,7 @@ async function main(): Promise<void> {
   const client = new ControlPlaneClient(config.controlPlaneBaseUrl, config.controlPlaneToken);
   const sessionStore = new JsonSessionStore(config.sessionStorePath);
   const workspacePreparer = new GitWorkspacePreparer(config.workspaceRoot, config.gitEnv);
+  const publisher = new GitResultPublisher(config);
   const executors = new Map([
     [
       'codex',
@@ -30,7 +32,8 @@ async function main(): Promise<void> {
     client,
     sessionStore,
     workspacePreparer,
-    executors
+    executors,
+    publisher
   });
 
   await agent.register();

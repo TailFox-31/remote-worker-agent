@@ -37,7 +37,13 @@ describe('loadConfig', () => {
       defaultProvider: 'codex',
       executionMode: 'strict',
       codexBin: 'codex',
-      codexSandbox: 'workspace-write'
+      codexSandbox: 'workspace-write',
+      publishMode: 'artifact',
+      publishBranchPrefix: 'job',
+      gitCommitName: 'Remote Worker Agent',
+      gitCommitEmail: 'remote-worker-agent@local',
+      githubApiBaseUrl: 'https://api.github.com',
+      githubPrDraft: false
     });
     expect(config.gitEnv).toEqual({});
     expect(config.runtimeEnv.CONTROL_PLANE_TOKEN).toBe('secret-token');
@@ -133,5 +139,36 @@ describe('loadConfig', () => {
     const config = loadConfig({} as NodeJS.ProcessEnv, { cwd: tempDir });
 
     expect(config.codexSandbox).toBe('danger-full-access');
+  });
+
+  it('allows publish and GitHub settings overrides', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-config-publish-'));
+
+    await writeFile(
+      path.join(tempDir, '.env'),
+      [
+        'CONTROL_PLANE_BASE_URL=http://127.0.0.1:8787',
+        'CONTROL_PLANE_TOKEN=file-token',
+        'WORKER_ID=file-worker',
+        'WORKER_PUBLISH_MODE=pr',
+        'WORKER_PUBLISH_BRANCH_PREFIX=worker/job',
+        'WORKER_GIT_COMMIT_NAME=Bot User',
+        'WORKER_GIT_COMMIT_EMAIL=bot@example.com',
+        'WORKER_GITHUB_TOKEN=github-token',
+        'WORKER_GITHUB_API_BASE_URL=https://ghe.example.test/api/v3',
+        'WORKER_GITHUB_PR_DRAFT=true'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const config = loadConfig({} as NodeJS.ProcessEnv, { cwd: tempDir });
+
+    expect(config.publishMode).toBe('pr');
+    expect(config.publishBranchPrefix).toBe('worker/job');
+    expect(config.gitCommitName).toBe('Bot User');
+    expect(config.gitCommitEmail).toBe('bot@example.com');
+    expect(config.githubToken).toBe('github-token');
+    expect(config.githubApiBaseUrl).toBe('https://ghe.example.test/api/v3');
+    expect(config.githubPrDraft).toBe(true);
   });
 });

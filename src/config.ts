@@ -19,6 +19,13 @@ export interface WorkerConfig {
   codexBin: string;
   codexModel?: string;
   codexSandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
+  publishMode: 'artifact' | 'push' | 'pr';
+  publishBranchPrefix: string;
+  gitCommitName: string;
+  gitCommitEmail: string;
+  githubToken?: string;
+  githubApiBaseUrl: string;
+  githubPrDraft: boolean;
   gitEnv: NodeJS.ProcessEnv;
   runtimeEnv: NodeJS.ProcessEnv;
 }
@@ -72,6 +79,34 @@ function parseCodexSandbox(raw: string | undefined): WorkerConfig['codexSandbox'
   }
 
   throw new Error(`Unsupported codex sandbox: ${raw}`);
+}
+
+function parsePublishMode(raw: string | undefined): WorkerConfig['publishMode'] {
+  if (!raw || raw === 'artifact') {
+    return 'artifact';
+  }
+
+  if (raw === 'push' || raw === 'pr') {
+    return raw;
+  }
+
+  throw new Error(`Unsupported publish mode: ${raw}`);
+}
+
+function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (!raw) {
+    return fallback;
+  }
+
+  if (raw === 'true') {
+    return true;
+  }
+
+  if (raw === 'false') {
+    return false;
+  }
+
+  throw new Error(`Expected boolean, received: ${raw}`);
 }
 
 function parseDotEnv(content: string): NodeJS.ProcessEnv {
@@ -174,6 +209,18 @@ export function loadConfig(
     codexBin: mergedEnv.WORKER_CODEX_BIN?.trim() || 'codex',
     codexModel: mergedEnv.WORKER_CODEX_MODEL?.trim() || undefined,
     codexSandbox: parseCodexSandbox(mergedEnv.WORKER_CODEX_SANDBOX),
+    publishMode: parsePublishMode(mergedEnv.WORKER_PUBLISH_MODE),
+    publishBranchPrefix: mergedEnv.WORKER_PUBLISH_BRANCH_PREFIX?.trim() || 'job',
+    gitCommitName: mergedEnv.WORKER_GIT_COMMIT_NAME?.trim() || 'Remote Worker Agent',
+    gitCommitEmail: mergedEnv.WORKER_GIT_COMMIT_EMAIL?.trim() || 'remote-worker-agent@local',
+    githubToken:
+      mergedEnv.WORKER_GITHUB_TOKEN?.trim() ||
+      mergedEnv.GITHUB_TOKEN?.trim() ||
+      mergedEnv.GH_TOKEN?.trim() ||
+      undefined,
+    githubApiBaseUrl:
+      mergedEnv.WORKER_GITHUB_API_BASE_URL?.trim().replace(/\/+$/u, '') || 'https://api.github.com',
+    githubPrDraft: parseBoolean(mergedEnv.WORKER_GITHUB_PR_DRAFT, false),
     gitEnv: pickGitEnv(mergedEnv),
     runtimeEnv: { ...mergedEnv }
   };

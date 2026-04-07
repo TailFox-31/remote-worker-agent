@@ -13,6 +13,7 @@ import type {
 } from './types.js';
 import type { ControlPlaneClient } from './control-plane-client.js';
 import type { ExecutorAdapter } from './executors/base.js';
+import type { PublishResult, ResultPublisher } from './publisher.js';
 
 export interface WorkerCycleResult {
   status: 'idle' | 'completed' | 'failed' | 'cancelled';
@@ -42,6 +43,7 @@ interface WorkerDependencies {
   sessionStore: JsonSessionStore;
   workspacePreparer: WorkspacePreparer;
   executors: Map<SessionProvider, ExecutorAdapter>;
+  publisher?: ResultPublisher;
 }
 
 class AttemptKeepalive {
@@ -247,55 +249,69 @@ export class RemoteWorkerAgent {
       await keepalive.stop();
       keepalive.throwIfFailed();
 
-      await this.uploadArtifacts(attemptId, leaseToken, executionResult.artifacts?.map((item) => item.request) ?? []);
+      const finalizedResult =
+        executionResult.status === 'completed'
+          ? this.mergeExecutionResult(
+              executionResult,
+              await this.deps.publisher?.publish({
+                job: claim.job,
+                workerId: this.config.workerId,
+                provider,
+                workspacePath: preparedWorkspace.workspacePath,
+                executionResult
+              })
+            )
+          : executionResult;
 
-      if (claim.session.session_key && executionResult.opaque_session_id) {
+      await this.uploadArtifacts(attemptId, leaseToken, finalizedResult.artifacts?.map((item) => item.request) ?? []);
+
+      if (claim.session.session_key && finalizedResult.opaque_session_id) {
         const record: SessionRecord = {
           session_key: claim.session.session_key,
           provider,
-          opaque_session_id: executionResult.opaque_session_id,
+          opaque_session_id: finalizedResult.opaque_session_id,
           updated_at: new Date().toISOString()
         };
         await this.deps.sessionStore.set(record);
       }
 
-      if (executionResult.status === 'completed') {
+      if (finalizedResult.status === 'completed') {
         await this.deps.client.completeAttempt(attemptId, leaseToken, {
           worker_id: this.config.workerId,
-          result_summary: executionResult.result_summary,
-          result_json: executionResult.result_json
+          result_summary: finalizedResult.result_summary,
+          result_json: finalizedResult.result_json
         });
         return {
           status: 'completed',
           jobId: claim.job.job_id,
-          detail: executionResult.result_summary
+          detail: finalizedResult.result_summary
         };
       }
 
-      if (executionResult.status === 'cancelled') {
+      if (finalizedResult.status === 'cancelled') {
         await this.deps.client.cancelAttempt(attemptId, leaseToken, {
           worker_id: this.config.workerId,
-          result_summary: executionResult.result_summary,
-          result_json: executionResult.result_json
+          result_summary: finalizedResult.result_summary,
+          result_json: finalizedResult.result_json
         });
         return {
           status: 'cancelled',
           jobId: claim.job.job_id,
-          detail: executionResult.result_summary
+          detail: finalizedResult.result_summary
         };
       }
 
       await this.deps.client.failAttempt(attemptId, leaseToken, {
         worker_id: this.config.workerId,
-        failure_code: executionResult.failure_code ?? 'execution_failed',
-        failure_message: executionResult.failure_message ?? executionResult.result_summary,
+        failure_code: finalizedResult.failure_code ?? 'execution_failed',
+        failure_message: finalizedResult.failure_message ?? finalizedResult.result_summary,
         retryable: false,
-        result_json: executionResult.result_json
+        result_json: finalizedResult.result_json
       });
       return {
         status: 'failed',
         jobId: claim.job.job_id,
-        detail: executionResult.result_summary
+        detail: finalizedResult.result_summary
       };
     } catch (error) {
       if (keepalive) {
@@ -348,6 +364,27 @@ export class RemoteWorkerAgent {
     for (const artifact of artifacts) {
       await this.deps.client.uploadArtifact(attemptId, leaseToken, artifact);
     }
+  }
+
+  private mergeExecutionResult<T extends Awaited<ReturnType<ExecutorAdapter['run']>>>(
+    executionResult: T,
+    publishResult: PublishResult | null | undefined
+  ): T {
+    if (!publishResult) {
+      return executionResult;
+    }
+
+    return {
+      ...executionResult,
+      result_summary: publishResult.summarySuffix
+        ? `${executionResult.result_summary} | ${publishResult.summarySuffix}`
+        : executionResult.result_summary,
+      result_json: {
+        ...(executionResult.result_json ?? {}),
+        ...(publishResult.resultJson ?? {})
+      },
+      artifacts: [...(executionResult.artifacts ?? []), ...(publishResult.artifacts ?? [])]
+    };
   }
 
   private async heartbeatWorker(

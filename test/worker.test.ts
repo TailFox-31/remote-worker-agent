@@ -10,6 +10,7 @@ import { JsonSessionStore } from '../src/session-store.js';
 import { StubWorkspacePreparer } from '../src/repo-workspace.js';
 import { RemoteWorkerAgent } from '../src/worker.js';
 import type { ExecutorAdapter, ExecutorRunContext } from '../src/executors/base.js';
+import type { ResultPublisher } from '../src/publisher.js';
 
 function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerConfig {
   return {
@@ -26,6 +27,12 @@ function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerCo
     sessionStorePath,
     codexBin: 'codex',
     codexSandbox: 'workspace-write',
+    publishMode: 'artifact',
+    publishBranchPrefix: 'job',
+    gitCommitName: 'Remote Worker Agent',
+    gitCommitEmail: 'remote-worker-agent@local',
+    githubApiBaseUrl: 'https://api.github.com',
+    githubPrDraft: false,
     gitEnv: {},
     runtimeEnv: {}
   };
@@ -320,5 +327,91 @@ describe('RemoteWorkerAgent', () => {
       jobId: 'job-1'
     });
     expect(heartbeatAttempt.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('merges publish results into completion output and uploads publish artifacts', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-publish-'));
+    const sessionStorePath = path.join(tempDir, 'sessions.json');
+    const workspaceRoot = path.join(tempDir, 'workspaces');
+    const config = createConfig(sessionStorePath, workspaceRoot);
+    const completeAttempt = vi.fn(async () => ({ job_status: 'completed' }));
+    const uploadArtifact = vi.fn(async () => ({ artifact_id: 'artifact-1' }));
+    const publisher: ResultPublisher = {
+      publish: vi.fn(async () => ({
+        summarySuffix: 'PR: https://github.com/TailFox-31/idle-game/pull/1',
+        resultJson: {
+          publish: {
+            branch_name: 'job/job-1',
+            pr_url: 'https://github.com/TailFox-31/idle-game/pull/1'
+          }
+        },
+        artifacts: [
+          {
+            request: {
+              kind: 'report' as const,
+              storage_type: 'inline' as const,
+              content_type: 'application/json',
+              content_base64: Buffer.from('publish', 'utf8').toString('base64')
+            }
+          }
+        ]
+      }))
+    };
+
+    const agent = new RemoteWorkerAgent(config, {
+      client: {
+        registerWorker: vi.fn(async () => ({
+          worker_id: 'worker-a',
+          status: 'idle',
+          heartbeat_interval_sec: 15,
+          lease_ttl_sec: 45
+        })),
+        heartbeatWorker: vi.fn(async () => ({
+          accepted: true,
+          server_time: '2026-04-07T00:00:00Z',
+          next_heartbeat_sec: 15,
+          drain_requested: false
+        })),
+        claimJob: vi.fn(async () => createClaim()),
+        startAttempt: vi.fn(async () => ({ status: 'running' })),
+        heartbeatAttempt: vi.fn(
+          async (): Promise<AttemptHeartbeatResponse> => ({
+            accepted: true,
+            lease_expires_at: '2026-04-07T00:00:30Z',
+            cancel_requested: false
+          })
+        ),
+        completeAttempt,
+        failAttempt: vi.fn(async () => ({ job_status: 'failed' })),
+        cancelAttempt: vi.fn(async () => ({ job_status: 'cancelled' })),
+        uploadArtifact
+      },
+      sessionStore: new JsonSessionStore(sessionStorePath),
+      workspacePreparer: new StubWorkspacePreparer(workspaceRoot),
+      executors: new Map([['codex', new FakeExecutor()]]),
+      publisher
+    });
+
+    const result = await agent.runCycle();
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      jobId: 'job-1',
+      detail: 'Execution completed | PR: https://github.com/TailFox-31/idle-game/pull/1'
+    });
+    expect(completeAttempt).toHaveBeenCalledWith(
+      'attempt-1',
+      'lease-1',
+      expect.objectContaining({
+        result_summary: 'Execution completed | PR: https://github.com/TailFox-31/idle-game/pull/1',
+        result_json: expect.objectContaining({
+          publish: {
+            branch_name: 'job/job-1',
+            pr_url: 'https://github.com/TailFox-31/idle-game/pull/1'
+          }
+        })
+      })
+    );
+    expect(uploadArtifact).toHaveBeenCalledTimes(2);
   });
 });
