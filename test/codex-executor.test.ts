@@ -23,6 +23,7 @@ function commitAll(repoPath: string, message: string): void {
 async function createFakeCodexBinary(rootPath: string): Promise<string> {
   const scriptPath = path.join(rootPath, 'fake-codex.mjs');
 const script = `#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -43,6 +44,11 @@ const gitConfigEnv = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => key.startsWith('GIT_CONFIG_'))
 );
 fs.writeFileSync(path.join(process.cwd(), 'git-config-env.json'), JSON.stringify(gitConfigEnv, null, 2), 'utf8');
+const safeDirectories = execFileSync('git', ['config', '--get-all', 'safe.directory'], {
+  cwd: process.cwd(),
+  encoding: 'utf8'
+});
+fs.writeFileSync(path.join(process.cwd(), 'safe-directories.txt'), safeDirectories, 'utf8');
 fs.appendFileSync(path.join(process.cwd(), 'note.txt'), '\\nchanged-by-fake-codex', 'utf8');
 
 if (outputPath) {
@@ -134,6 +140,8 @@ describe('CodexExecutor', () => {
       .map(([, value]) => value);
     expect(configKeys).toContain('safe.directory');
     expect(configValues).toContain(workspacePath);
+    const safeDirectories = await readFile(path.join(workspacePath, 'safe-directories.txt'), 'utf8');
+    expect(safeDirectories.split(/\r?\n/u).filter(Boolean)).toContain(workspacePath);
     expect((context.onProgress as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
   });
 
