@@ -44,6 +44,103 @@ interface WorkerDependencies {
   executors: Map<SessionProvider, ExecutorAdapter>;
 }
 
+class AttemptKeepalive {
+  private readonly intervalMs: number;
+  private readonly sessionTouch: boolean;
+  private readonly sendHeartbeat: (
+    phase: string,
+    message: string | undefined,
+    sessionTouch: boolean
+  ) => Promise<void>;
+  private readonly abortController: AbortController;
+  private timer: NodeJS.Timeout | null = null;
+  private inFlight: Promise<void> | null = null;
+  private error: unknown = null;
+  private progressPhase: string;
+  private progressMessage: string | undefined;
+  private stopped = false;
+
+  constructor(options: {
+    intervalMs: number;
+    initialPhase: string;
+    initialMessage?: string;
+    sessionTouch: boolean;
+    abortController: AbortController;
+    sendHeartbeat: (phase: string, message: string | undefined, sessionTouch: boolean) => Promise<void>;
+  }) {
+    this.intervalMs = options.intervalMs;
+    this.progressPhase = options.initialPhase;
+    this.progressMessage = options.initialMessage;
+    this.sessionTouch = options.sessionTouch;
+    this.abortController = options.abortController;
+    this.sendHeartbeat = options.sendHeartbeat;
+  }
+
+  start(): void {
+    if (this.timer) {
+      return;
+    }
+
+    this.timer = setInterval(() => {
+      void this.flush();
+    }, this.intervalMs);
+  }
+
+  update(phase: string, message?: string): void {
+    this.progressPhase = phase;
+    this.progressMessage = message;
+  }
+
+  async flush(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+
+    if (this.error) {
+      throw this.error;
+    }
+
+    if (!this.inFlight) {
+      this.inFlight = this.sendHeartbeat(this.progressPhase, this.progressMessage, this.sessionTouch).catch((error) => {
+        this.error = error;
+        this.abortController.abort();
+      });
+    }
+
+    try {
+      await this.inFlight;
+    } finally {
+      this.inFlight = null;
+    }
+
+    if (this.error) {
+      throw this.error;
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+
+    if (this.inFlight) {
+      try {
+        await this.inFlight;
+      } finally {
+        this.inFlight = null;
+      }
+    }
+  }
+
+  throwIfFailed(): void {
+    if (this.error) {
+      throw this.error;
+    }
+  }
+}
+
 export class RemoteWorkerAgent {
   constructor(
     private readonly config: WorkerConfig,
@@ -103,6 +200,8 @@ export class RemoteWorkerAgent {
       resumeSession?.opaque_session_id ?? `${provider}:${claim.job.job_id}`;
 
     let preparedWorkspace: PreparedWorkspace | null = null;
+    let keepalive: AttemptKeepalive | null = null;
+    const executionController = new AbortController();
 
     try {
       await this.deps.client.startAttempt(attemptId, leaseToken, {
@@ -112,30 +211,41 @@ export class RemoteWorkerAgent {
         session_reused: Boolean(resumeSession)
       });
 
-      const workspaceHeartbeat = await this.deps.client.heartbeatAttempt(attemptId, leaseToken, {
-        worker_id: this.config.workerId,
-        progress_phase: 'prepare_workspace',
-        progress_message: 'Preparing workspace',
-        session_touch: Boolean(resumeSession)
+      keepalive = new AttemptKeepalive({
+        intervalMs: Math.max(1_000, claim.attempt.heartbeat_interval_sec * 1_000),
+        initialPhase: 'prepare_workspace',
+        initialMessage: 'Preparing workspace',
+        sessionTouch: Boolean(resumeSession),
+        abortController: executionController,
+        sendHeartbeat: async (phase, message, sessionTouch) => {
+          const heartbeat = await this.deps.client.heartbeatAttempt(attemptId, leaseToken, {
+            worker_id: this.config.workerId,
+            progress_phase: phase,
+            progress_message: message,
+            session_touch: sessionTouch
+          });
+          this.throwIfCancelled(heartbeat);
+        }
       });
-      this.throwIfCancelled(workspaceHeartbeat);
+      keepalive.start();
+      await keepalive.flush();
 
       preparedWorkspace = await this.deps.workspacePreparer.prepare(claim.job);
+      keepalive.throwIfFailed();
 
       const executionResult = await executor.run({
         job: claim.job,
         workspacePath: preparedWorkspace.workspacePath,
         resumeSession,
+        signal: executionController.signal,
         onProgress: async (phase, message) => {
-          const heartbeat = await this.deps.client.heartbeatAttempt(attemptId, leaseToken, {
-            worker_id: this.config.workerId,
-            progress_phase: phase,
-            progress_message: message,
-            session_touch: Boolean(resumeSession)
-          });
-          this.throwIfCancelled(heartbeat);
+          keepalive?.update(phase, message);
+          await keepalive?.flush();
+          keepalive?.throwIfFailed();
         }
       });
+      await keepalive.stop();
+      keepalive.throwIfFailed();
 
       await this.uploadArtifacts(attemptId, leaseToken, executionResult.artifacts?.map((item) => item.request) ?? []);
 
@@ -188,6 +298,10 @@ export class RemoteWorkerAgent {
         detail: executionResult.result_summary
       };
     } catch (error) {
+      if (keepalive) {
+        await keepalive.stop();
+      }
+
       if (error instanceof AttemptCancelledError) {
         await this.deps.client.cancelAttempt(attemptId, leaseToken, {
           worker_id: this.config.workerId,
@@ -216,6 +330,9 @@ export class RemoteWorkerAgent {
         detail: message
       };
     } finally {
+      if (keepalive) {
+        await keepalive.stop();
+      }
       await this.heartbeatWorker('idle', []);
       if (preparedWorkspace) {
         await this.persistWorkspaceManifest(preparedWorkspace);

@@ -86,6 +86,7 @@ function createContext(workspacePath: string, resumeSession: ExecutorRunContext[
     },
     workspacePath,
     resumeSession,
+    signal: new AbortController().signal,
     onProgress: vi.fn(async () => {})
   };
 }
@@ -104,6 +105,7 @@ describe('CodexExecutor', () => {
     const executor = new CodexExecutor({
       executionMode: 'strict',
       bin: binaryPath,
+      sandbox: 'workspace-write',
       env: process.env
     });
     const context = createContext(workspacePath);
@@ -132,6 +134,7 @@ describe('CodexExecutor', () => {
     const executor = new CodexExecutor({
       executionMode: 'strict',
       bin: binaryPath,
+      sandbox: 'workspace-write',
       env: process.env
     });
     const context = createContext(workspacePath, {
@@ -159,6 +162,7 @@ describe('CodexExecutor', () => {
     const executor = new CodexExecutor({
       executionMode: 'strict',
       bin: binaryPath,
+      sandbox: 'workspace-write',
       env: {
         ...process.env,
         FAKE_CODEX_MODE: 'fail'

@@ -25,12 +25,13 @@ function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerCo
     workspaceRoot,
     sessionStorePath,
     codexBin: 'codex',
+    codexSandbox: 'workspace-write',
     gitEnv: {},
     runtimeEnv: {}
   };
 }
 
-function createClaim(): JobClaimResponse {
+function createClaim(overrides: Partial<JobClaimResponse['attempt']> = {}): JobClaimResponse {
   return {
     job: {
       job_id: 'job-1',
@@ -48,7 +49,8 @@ function createClaim(): JobClaimResponse {
       attempt_id: 'attempt-1',
       lease_token: 'lease-1',
       heartbeat_interval_sec: 15,
-      lease_ttl_sec: 45
+      lease_ttl_sec: 45,
+      ...overrides
     },
     session: {
       session_key: 'discord:room:1',
@@ -87,6 +89,18 @@ class FakeExecutor implements ExecutorAdapter {
           }
         }
       ]
+    };
+  }
+}
+
+class SlowExecutor implements ExecutorAdapter {
+  readonly provider = 'codex' as const;
+
+  async run(_context: ExecutorRunContext) {
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    return {
+      status: 'completed' as const,
+      result_summary: 'Slow execution completed'
     };
   }
 }
@@ -257,5 +271,54 @@ describe('RemoteWorkerAgent', () => {
       detail: 'start failed'
     });
     expect(failAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps renewing attempt leases while a long-running executor is still busy', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-keepalive-'));
+    const sessionStorePath = path.join(tempDir, 'sessions.json');
+    const workspaceRoot = path.join(tempDir, 'workspaces');
+    const config = createConfig(sessionStorePath, workspaceRoot);
+    const heartbeatAttempt = vi.fn(
+      async (): Promise<AttemptHeartbeatResponse> => ({
+        accepted: true,
+        lease_expires_at: '2026-04-07T00:00:30Z',
+        cancel_requested: false
+      })
+    );
+
+    const agent = new RemoteWorkerAgent(config, {
+      client: {
+        registerWorker: vi.fn(async () => ({
+          worker_id: 'worker-a',
+          status: 'idle',
+          heartbeat_interval_sec: 15,
+          lease_ttl_sec: 45
+        })),
+        heartbeatWorker: vi.fn(async () => ({
+          accepted: true,
+          server_time: '2026-04-07T00:00:00Z',
+          next_heartbeat_sec: 15,
+          drain_requested: false
+        })),
+        claimJob: vi.fn(async () => createClaim({ heartbeat_interval_sec: 1, lease_ttl_sec: 3 })),
+        startAttempt: vi.fn(async () => ({ status: 'running' })),
+        heartbeatAttempt,
+        completeAttempt: vi.fn(async () => ({ job_status: 'completed' })),
+        failAttempt: vi.fn(async () => ({ job_status: 'failed' })),
+        cancelAttempt: vi.fn(async () => ({ job_status: 'cancelled' })),
+        uploadArtifact: vi.fn(async () => ({ artifact_id: 'artifact-1' }))
+      },
+      sessionStore: new JsonSessionStore(sessionStorePath),
+      workspacePreparer: new StubWorkspacePreparer(workspaceRoot),
+      executors: new Map([['codex', new SlowExecutor()]])
+    });
+
+    const result = await agent.runCycle();
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      jobId: 'job-1'
+    });
+    expect(heartbeatAttempt.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -19,6 +19,7 @@ async function main(): Promise<void> {
         executionMode: config.executionMode,
         bin: config.codexBin,
         model: config.codexModel,
+        sandbox: config.codexSandbox,
         env: config.runtimeEnv
       })
     ],

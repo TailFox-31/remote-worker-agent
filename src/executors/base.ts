@@ -4,6 +4,7 @@ export interface ExecutorRunContext {
   job: RemoteWorkerJob;
   workspacePath: string;
   resumeSession: SessionResume | null;
+  signal: AbortSignal;
   onProgress: (phase: string, message: string) => Promise<void>;
 }
 

@@ -15,6 +15,7 @@ interface CodexExecutorOptions {
   executionMode: 'dry-run' | 'strict';
   bin?: string;
   model?: string;
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
   env?: NodeJS.ProcessEnv;
   heartbeatIntervalMs?: number;
 }
@@ -138,7 +139,8 @@ async function collectProcessOutput(
   env: NodeJS.ProcessEnv,
   stdinContent: string,
   onProgress: (stdoutBytes: number, stderrBytes: number) => Promise<void>,
-  heartbeatIntervalMs: number
+  heartbeatIntervalMs: number,
+  signal?: AbortSignal
 ): Promise<CapturedProcessOutput> {
   const child = spawn(processSpec.command, processSpec.args, {
     cwd,
@@ -153,6 +155,7 @@ async function collectProcessOutput(
   let stdoutBytes = 0;
   let stderrBytes = 0;
   let heartbeatError: unknown;
+  let abortError: Error | null = null;
   let heartbeatInFlight: Promise<void> | null = null;
 
   const terminateChild = (): void => {
@@ -185,6 +188,21 @@ async function collectProcessOutput(
     void pulseHeartbeat();
   }, heartbeatIntervalMs);
 
+  const handleAbort = (): void => {
+    if (!abortError) {
+      abortError = new Error('codex execution aborted');
+    }
+    terminateChild();
+  };
+
+  if (signal) {
+    if (signal.aborted) {
+      handleAbort();
+    } else {
+      signal.addEventListener('abort', handleAbort, { once: true });
+    }
+  }
+
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
@@ -203,6 +221,7 @@ async function collectProcessOutput(
     child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
   }).finally(() => {
     clearInterval(heartbeatTimer);
+    signal?.removeEventListener('abort', handleAbort);
   });
 
   if (heartbeatInFlight) {
@@ -211,6 +230,10 @@ async function collectProcessOutput(
 
   if (heartbeatError) {
     throw heartbeatError;
+  }
+
+  if (abortError) {
+    throw abortError;
   }
 
   return {
@@ -295,6 +318,7 @@ function buildArtifacts(
 export class CodexExecutor extends SkeletonExecutor {
   private readonly bin: string;
   private readonly model?: string;
+  private readonly sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
   private readonly env: NodeJS.ProcessEnv;
   private readonly heartbeatIntervalMs: number;
 
@@ -307,6 +331,7 @@ export class CodexExecutor extends SkeletonExecutor {
     super('codex', options.executionMode);
     this.bin = options.bin ?? 'codex';
     this.model = options.model;
+    this.sandbox = options.sandbox ?? 'workspace-write';
     this.env = options.env ?? process.env;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   }
@@ -326,6 +351,7 @@ export class CodexExecutor extends SkeletonExecutor {
     }
 
     args.push('--skip-git-repo-check', '--json', '-o', outputFilePath);
+    args.push('-s', this.sandbox);
 
     if (this.model) {
       args.push('-m', this.model);
@@ -347,7 +373,8 @@ export class CodexExecutor extends SkeletonExecutor {
         async (stdoutBytes, stderrBytes) => {
           await context.onProgress('execute', buildProgressMessage(stdoutBytes, stderrBytes));
         },
-        this.heartbeatIntervalMs
+        this.heartbeatIntervalMs,
+        context.signal
       );
 
       const parsedOutput = parseCodexJsonOutput(output.stdout);
@@ -365,6 +392,7 @@ export class CodexExecutor extends SkeletonExecutor {
         resumed_session_id: context.resumeSession?.opaque_session_id ?? null,
         command: [processSpec.command, ...processSpec.args].join(' '),
         model: this.model ?? null,
+        sandbox: this.sandbox,
         prompt_preview: context.job.prompt.slice(0, 200),
         usage: parsedOutput.usage ?? null
       };

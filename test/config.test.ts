@@ -36,7 +36,8 @@ describe('loadConfig', () => {
       maxConcurrency: 2,
       defaultProvider: 'codex',
       executionMode: 'strict',
-      codexBin: 'codex'
+      codexBin: 'codex',
+      codexSandbox: 'workspace-write'
     });
     expect(config.gitEnv).toEqual({});
     expect(config.runtimeEnv.CONTROL_PLANE_TOKEN).toBe('secret-token');
@@ -111,6 +112,26 @@ describe('loadConfig', () => {
 
     expect(config.codexBin).toBe('C:/Tools/codex.cmd');
     expect(config.codexModel).toBe('gpt-5.4-codex');
+    expect(config.codexSandbox).toBe('workspace-write');
     expect(config.runtimeEnv.CODEX_HOME).toBe('C:/Users/test/.codex');
+  });
+
+  it('allows codex sandbox overrides', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-config-codex-sandbox-'));
+
+    await writeFile(
+      path.join(tempDir, '.env'),
+      [
+        'CONTROL_PLANE_BASE_URL=http://127.0.0.1:8787',
+        'CONTROL_PLANE_TOKEN=file-token',
+        'WORKER_ID=file-worker',
+        'WORKER_CODEX_SANDBOX=danger-full-access'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const config = loadConfig({} as NodeJS.ProcessEnv, { cwd: tempDir });
+
+    expect(config.codexSandbox).toBe('danger-full-access');
   });
 });

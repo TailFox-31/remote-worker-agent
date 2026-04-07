@@ -18,6 +18,7 @@ export interface WorkerConfig {
   sessionStorePath: string;
   codexBin: string;
   codexModel?: string;
+  codexSandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
   gitEnv: NodeJS.ProcessEnv;
   runtimeEnv: NodeJS.ProcessEnv;
 }
@@ -59,6 +60,18 @@ function parseProvider(raw: string | undefined): SessionProvider {
   }
 
   throw new Error(`Unsupported provider: ${raw}`);
+}
+
+function parseCodexSandbox(raw: string | undefined): WorkerConfig['codexSandbox'] {
+  if (!raw || raw === 'workspace-write') {
+    return 'workspace-write';
+  }
+
+  if (raw === 'read-only' || raw === 'danger-full-access') {
+    return raw;
+  }
+
+  throw new Error(`Unsupported codex sandbox: ${raw}`);
 }
 
 function parseDotEnv(content: string): NodeJS.ProcessEnv {
@@ -160,6 +173,7 @@ export function loadConfig(
     sessionStorePath,
     codexBin: mergedEnv.WORKER_CODEX_BIN?.trim() || 'codex',
     codexModel: mergedEnv.WORKER_CODEX_MODEL?.trim() || undefined,
+    codexSandbox: parseCodexSandbox(mergedEnv.WORKER_CODEX_SANDBOX),
     gitEnv: pickGitEnv(mergedEnv),
     runtimeEnv: { ...mergedEnv }
   };

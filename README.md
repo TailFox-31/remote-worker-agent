@@ -66,6 +66,7 @@ npm run start
 - `WORKER_EXECUTION_MODE` `dry-run | strict`, 기본 `dry-run`
 - `WORKER_CODEX_BIN` 기본 `codex`
 - `WORKER_CODEX_MODEL` 선택, 예: `gpt-5.4-codex`
+- `WORKER_CODEX_SANDBOX` 기본 `workspace-write`
 - `CODEX_HOME`, `OPENAI_API_KEY` 같은 Codex 런타임 env도 `.env`에서 그대로 전달됩니다
 - `WORKER_POLL_INTERVAL_MS` 기본 `5000`
 - `WORKER_WORKSPACE_ROOT` 기본 `.workspaces`
@@ -96,6 +97,7 @@ WORKER_CAPABILITIES=os:windows,tool:codex,tool:git
 WORKER_DEFAULT_PROVIDER=codex
 WORKER_EXECUTION_MODE=strict
 WORKER_CODEX_BIN=codex
+WORKER_CODEX_SANDBOX=workspace-write
 WORKER_GIT_SSH_COMMAND=ssh -i C:/Users/you/.ssh/id_ed25519 -o IdentitiesOnly=yes
 WORKER_GIT_TERMINAL_PROMPT=0
 ```
