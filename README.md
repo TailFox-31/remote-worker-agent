@@ -153,6 +153,13 @@ Windows self-hosted smoke:
 - repo 내부 [mock-control-plane.mjs](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/scripts/mock-control-plane.mjs) 를 띄워 `start:once`를 검증
 - 외부 EJClaw 서비스에 의존하지 않아서 runner 환경 검증에 적합
 
+Windows self-hosted strict Codex smoke:
+
+- [windows-self-hosted-strict-codex-smoke.yml](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/.github/workflows/windows-self-hosted-strict-codex-smoke.yml)
+- 실제 `codex` CLI를 사용해 temp repo의 `README.md`를 수정
+- mock control plane state에서 `completed`와 `patch` artifact 내용을 함께 검증
+- runner 서비스 계정에 Codex 인증 또는 `OPENAI_API_KEY` secret이 필요
+
 운영용 e2e와의 역할 분리:
 
 - 이 workflow는 `worker agent 자체`의 smoke
