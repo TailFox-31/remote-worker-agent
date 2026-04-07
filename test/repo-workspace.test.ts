@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -18,7 +18,7 @@ async function git(args: string[], cwd: string): Promise<string> {
 
 async function createSourceRepo(rootDir: string): Promise<{ repoPath: string; commit: string }> {
   const repoPath = path.join(rootDir, 'source-repo');
-  await execFileAsync('mkdir', ['-p', repoPath]);
+  await mkdir(repoPath, { recursive: true });
   await git(['init', '--initial-branch=main'], repoPath);
   await git(['config', 'user.name', 'Test User'], repoPath);
   await git(['config', 'user.email', 'test@example.com'], repoPath);
