@@ -12,7 +12,7 @@ jobs:
       run:
         shell: pwsh
     env:
-      CONTROL_PLANE_BASE_URL: http://127.0.0.1:8787
+      CONTROL_PLANE_BASE_URL: http://127.0.0.1:8788
       CONTROL_PLANE_TOKEN: ci-token
       WORKER_ID: ci-worker-win
       WORKER_DISPLAY_NAME: CI Windows Worker
@@ -69,6 +69,7 @@ jobs:
 
       - name: Start mock control plane
         run: |
+          $env:MOCK_CONTROL_PLANE_PORT = '8788'
           $env:MOCK_CONTROL_PLANE_TOKEN = $env:CONTROL_PLANE_TOKEN
           $env:MOCK_JOB_REPO_URL = $env:MOCK_JOB_REPO_URL
           $env:MOCK_JOB_BASE_COMMIT = $env:MOCK_JOB_BASE_COMMIT
@@ -81,7 +82,7 @@ jobs:
           $process = Start-Process node -ArgumentList 'scripts/mock-control-plane.mjs' -WorkingDirectory $PWD -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
           "MOCK_SERVER_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Start-Sleep -Seconds 2
-          Invoke-RestMethod -Uri 'http://127.0.0.1:8787/__state' | Out-Null
+          Invoke-RestMethod -Uri 'http://127.0.0.1:8788/__state' | Out-Null
 
       - name: Run worker start:once smoke
         run: |
@@ -97,7 +98,7 @@ jobs:
 
       - name: Assert mock control plane state
         run: |
-          $state = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/__state'
+          $state = Invoke-RestMethod -Uri 'http://127.0.0.1:8788/__state'
           if ($state.job.status -ne 'completed') {
             throw "Expected completed job status, got $($state.job.status)"
           }
