@@ -21,8 +21,8 @@ function commitAll(repoPath: string, message: string): void {
 }
 
 async function createFakeCodexBinary(rootPath: string): Promise<string> {
-  const scriptPath = path.join(rootPath, 'fake-codex.mjs');
-const script = `#!/usr/bin/env node
+  const runnerPath = path.join(rootPath, 'fake-codex-runner.mjs');
+  const script = `#!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,9 +75,22 @@ process.stdout.write(JSON.stringify({
 process.stderr.write('fake stderr\\n');
 `;
 
-  await writeFile(scriptPath, script, 'utf8');
-  await chmod(scriptPath, 0o755);
-  return scriptPath;
+  await writeFile(runnerPath, script, 'utf8');
+  await chmod(runnerPath, 0o755);
+
+  if (process.platform === 'win32') {
+    const commandPath = path.join(rootPath, 'fake-codex.cmd');
+    const escapedRunnerPath = runnerPath.replace(/"/g, '""');
+    const wrapper = `@echo off\r\n"${process.execPath}" "${escapedRunnerPath}" %*\r\n`;
+    await writeFile(commandPath, wrapper, 'utf8');
+    return commandPath;
+  }
+
+  const commandPath = path.join(rootPath, 'fake-codex');
+  const wrapper = `#!/usr/bin/env sh\nexec "${process.execPath}" "${runnerPath}" "$@"\n`;
+  await writeFile(commandPath, wrapper, 'utf8');
+  await chmod(commandPath, 0o755);
+  return commandPath;
 }
 
 function createContext(workspacePath: string, resumeSession: ExecutorRunContext['resumeSession'] = null): ExecutorRunContext {
