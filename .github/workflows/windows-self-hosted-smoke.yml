@@ -1,0 +1,124 @@
+name: windows-self-hosted-smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on:
+      - self-hosted
+      - windows
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CONTROL_PLANE_BASE_URL: http://127.0.0.1:8787
+      CONTROL_PLANE_TOKEN: ci-token
+      WORKER_ID: ci-worker-win
+      WORKER_DISPLAY_NAME: CI Windows Worker
+      WORKER_CAPABILITIES: os:windows,tool:codex,tool:git
+      WORKER_MAX_CONCURRENCY: '1'
+      WORKER_DEFAULT_PROVIDER: codex
+      WORKER_EXECUTION_MODE: dry-run
+      WORKER_POLL_INTERVAL_MS: '1000'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Prepare local git repo for smoke job
+        run: |
+          $repoDir = Join-Path $env:RUNNER_TEMP 'worker-agent-smoke-repo'
+          if (Test-Path $repoDir) {
+            Remove-Item -LiteralPath $repoDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $repoDir | Out-Null
+          git -C $repoDir init -q --initial-branch=main
+          git -C $repoDir config user.name "CI Smoke"
+          git -C $repoDir config user.email "ci-smoke@example.test"
+          @"
+          # Worker Agent Smoke Repo
+
+          Initial content for CI smoke.
+          "@ | Set-Content -LiteralPath (Join-Path $repoDir 'README.md')
+          git -C $repoDir add README.md
+          git -C $repoDir commit -qm "init smoke repo"
+          $baseCommit = git -C $repoDir rev-parse HEAD
+          "MOCK_JOB_REPO_URL=$($repoDir -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MOCK_JOB_BASE_COMMIT=$baseCommit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "WORKER_WORKSPACE_ROOT=$($env:RUNNER_TEMP -replace '\\','/')/.workspaces" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "WORKER_SESSION_STORE=$($env:RUNNER_TEMP -replace '\\','/')/.sessions/store.json" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Start mock control plane
+        run: |
+          $env:MOCK_CONTROL_PLANE_TOKEN = $env:CONTROL_PLANE_TOKEN
+          $env:MOCK_JOB_REPO_URL = $env:MOCK_JOB_REPO_URL
+          $env:MOCK_JOB_BASE_COMMIT = $env:MOCK_JOB_BASE_COMMIT
+          $env:MOCK_JOB_REQUIREMENTS = "tool:codex,tool:git,os:windows"
+          $env:MOCK_JOB_TARGET_FILES = "README.md"
+          $env:MOCK_JOB_PROMPT = "Open README.md, append a single new line that says `CI smoke executed.` and then stop. Keep all other content unchanged."
+          $env:MOCK_STATE_FILE = Join-Path $env:RUNNER_TEMP 'mock-control-plane-state.json'
+          $stdoutPath = Join-Path $env:RUNNER_TEMP 'mock-control-plane.stdout.log'
+          $stderrPath = Join-Path $env:RUNNER_TEMP 'mock-control-plane.stderr.log'
+          $process = Start-Process node -ArgumentList 'scripts/mock-control-plane.mjs' -WorkingDirectory $PWD -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+          "MOCK_SERVER_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Start-Sleep -Seconds 2
+          Invoke-RestMethod -Uri 'http://127.0.0.1:8787/__state' | Out-Null
+
+      - name: Run worker start:once smoke
+        run: |
+          $output = npm run start:once 2>&1
+          $outputText = ($output | Out-String)
+          $outputText | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'worker-start-once.log')
+          if ($LASTEXITCODE -ne 0) {
+            throw "start:once failed with exit code $LASTEXITCODE"
+          }
+          if ($outputText -notmatch 'completed job=job-ci-smoke-1') {
+            throw "Expected completed output, got: $outputText"
+          }
+
+      - name: Assert mock control plane state
+        run: |
+          $state = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/__state'
+          if ($state.job.status -ne 'completed') {
+            throw "Expected completed job status, got $($state.job.status)"
+          }
+          if ($state.artifacts.Count -lt 1) {
+            throw "Expected at least one uploaded artifact"
+          }
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-self-hosted-smoke-logs
+          path: |
+            ${{ runner.temp }}/mock-control-plane.stdout.log
+            ${{ runner.temp }}/mock-control-plane.stderr.log
+            ${{ runner.temp }}/mock-control-plane-state.json
+            ${{ runner.temp }}/worker-start-once.log
+
+      - name: Stop mock control plane
+        if: always()
+        run: |
+          if ($env:MOCK_SERVER_PID) {
+            Stop-Process -Id ([int]$env:MOCK_SERVER_PID) -Force -ErrorAction SilentlyContinue
+          }

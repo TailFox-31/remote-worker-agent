@@ -139,3 +139,21 @@ completed job=<job_id> summary="..."
 - `jobs.status = completed`
 - `latest_attempt.provider = codex`
 - `artifacts`에 `report`, `stdout`, `stderr`, 변경이 있으면 `patch`
+
+## CI/CD
+
+기본 CI:
+
+- [ci.yml](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/.github/workflows/ci.yml)
+- `ubuntu-latest`에서 `npm test`, `typecheck`, `build`
+
+Windows self-hosted smoke:
+
+- [windows-self-hosted-smoke.yml](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/.github/workflows/windows-self-hosted-smoke.yml)
+- repo 내부 [mock-control-plane.mjs](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/scripts/mock-control-plane.mjs) 를 띄워 `start:once`를 검증
+- 외부 EJClaw 서비스에 의존하지 않아서 runner 환경 검증에 적합
+
+운영용 e2e와의 역할 분리:
+
+- 이 workflow는 `worker agent 자체`의 smoke
+- 실제 EJClaw control plane과 붙는 통합 검증은 별도 workflow나 수동 smoke로 두는 편이 안전
