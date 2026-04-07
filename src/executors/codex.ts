@@ -133,6 +133,29 @@ function buildCodexProcess(bin: string, args: string[]): ProcessSpec {
   };
 }
 
+function withGitConfigOverride(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  value: string
+): NodeJS.ProcessEnv {
+  const mergedEnv: NodeJS.ProcessEnv = {
+    ...env
+  };
+  const existingCount = Number.parseInt(mergedEnv.GIT_CONFIG_COUNT ?? '0', 10);
+  const safeCount = Number.isInteger(existingCount) && existingCount >= 0 ? existingCount : 0;
+  const nextIndex = safeCount;
+
+  mergedEnv.GIT_CONFIG_COUNT = String(safeCount + 1);
+  mergedEnv[`GIT_CONFIG_KEY_${nextIndex}`] = key;
+  mergedEnv[`GIT_CONFIG_VALUE_${nextIndex}`] = value;
+
+  return mergedEnv;
+}
+
+function buildCodexEnv(baseEnv: NodeJS.ProcessEnv, workspacePath: string): NodeJS.ProcessEnv {
+  return withGitConfigOverride(baseEnv, 'safe.directory', workspacePath);
+}
+
 async function collectProcessOutput(
   processSpec: ProcessSpec,
   cwd: string,
@@ -243,9 +266,9 @@ async function collectProcessOutput(
   };
 }
 
-async function captureGitDiff(workspacePath: string): Promise<string> {
+async function captureGitDiff(workspacePath: string, env: NodeJS.ProcessEnv): Promise<string> {
   const child = spawn('git', ['-C', workspacePath, 'diff', '--binary', '--no-color'], {
-    env: process.env,
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
   });
@@ -362,13 +385,17 @@ export class CodexExecutor extends SkeletonExecutor {
     await context.onProgress('execute', `${this.provider} executor started`);
 
     try {
-      const output = await collectProcessOutput(
-        processSpec,
-        context.workspacePath,
+      const codexEnv = buildCodexEnv(
         {
           ...process.env,
           ...this.env
         },
+        context.workspacePath
+      );
+      const output = await collectProcessOutput(
+        processSpec,
+        context.workspacePath,
+        codexEnv,
         prompt,
         async (stdoutBytes, stderrBytes) => {
           await context.onProgress('execute', buildProgressMessage(stdoutBytes, stderrBytes));
@@ -379,7 +406,7 @@ export class CodexExecutor extends SkeletonExecutor {
 
       const parsedOutput = parseCodexJsonOutput(output.stdout);
       const outputText = (await readFile(outputFilePath, 'utf8').catch(() => '')).trim();
-      const diff = await captureGitDiff(context.workspacePath);
+      const diff = await captureGitDiff(context.workspacePath, codexEnv);
       const summary =
         outputText || parsedOutput.lastAgentMessage || `codex exec completed for ${context.job.job_id}`;
 

@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +22,7 @@ function commitAll(repoPath: string, message: string): void {
 
 async function createFakeCodexBinary(rootPath: string): Promise<string> {
   const scriptPath = path.join(rootPath, 'fake-codex.mjs');
-  const script = `#!/usr/bin/env node
+const script = `#!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -39,6 +39,10 @@ if (process.env.FAKE_CODEX_MODE === 'fail') {
 }
 
 fs.writeFileSync(path.join(process.cwd(), 'prompt.log'), prompt, 'utf8');
+const gitConfigEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => key.startsWith('GIT_CONFIG_'))
+);
+fs.writeFileSync(path.join(process.cwd(), 'git-config-env.json'), JSON.stringify(gitConfigEnv, null, 2), 'utf8');
 fs.appendFileSync(path.join(process.cwd(), 'note.txt'), '\\nchanged-by-fake-codex', 'utf8');
 
 if (outputPath) {
@@ -118,6 +122,18 @@ describe('CodexExecutor', () => {
     expect(result.artifacts?.map((artifact) => artifact.request.kind)).toEqual(
       expect.arrayContaining(['report', 'stdout', 'stderr', 'patch'])
     );
+    const gitConfigEnv = JSON.parse(
+      await readFile(path.join(workspacePath, 'git-config-env.json'), 'utf8')
+    ) as Record<string, string>;
+    expect(gitConfigEnv.GIT_CONFIG_COUNT).toBeDefined();
+    const configKeys = Object.entries(gitConfigEnv)
+      .filter(([key]) => key.startsWith('GIT_CONFIG_KEY_'))
+      .map(([, value]) => value);
+    const configValues = Object.entries(gitConfigEnv)
+      .filter(([key]) => key.startsWith('GIT_CONFIG_VALUE_'))
+      .map(([, value]) => value);
+    expect(configKeys).toContain('safe.directory');
+    expect(configValues).toContain(workspacePath);
     expect((context.onProgress as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
   });
 
