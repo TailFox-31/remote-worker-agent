@@ -159,6 +159,7 @@ Windows self-hosted strict Codex smoke:
 - 실제 `codex` CLI를 사용해 temp repo의 `README.md`를 수정
 - mock control plane state에서 `completed`와 `patch` artifact 내용을 함께 검증
 - runner 서비스 계정에 Codex 인증 또는 `OPENAI_API_KEY` secret이 필요
+- runner 서비스 PATH에 `codex`가 없으면 repo variable `WORKER_CODEX_BIN`으로 전체 경로를 지정할 수 있음
 
 운영용 e2e와의 역할 분리:
 

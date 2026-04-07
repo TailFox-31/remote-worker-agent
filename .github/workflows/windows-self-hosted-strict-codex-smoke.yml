@@ -21,11 +21,11 @@ jobs:
       WORKER_MAX_CONCURRENCY: '1'
       WORKER_DEFAULT_PROVIDER: codex
       WORKER_EXECUTION_MODE: strict
-      WORKER_CODEX_BIN: codex
       WORKER_CODEX_SANDBOX: workspace-write
       WORKER_POLL_INTERVAL_MS: '1000'
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WORKER_CODEX_MODEL: ${{ vars.WORKER_CODEX_MODEL }}
+      WORKER_CODEX_BIN_HINT: ${{ vars.WORKER_CODEX_BIN }}
 
     steps:
       - name: Checkout
@@ -49,10 +49,46 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Resolve Codex CLI
+        run: |
+          $candidates = New-Object System.Collections.Generic.List[string]
+
+          if ($env:WORKER_CODEX_BIN_HINT) {
+            $candidates.Add($env:WORKER_CODEX_BIN_HINT)
+          }
+
+          $command = Get-Command codex -ErrorAction SilentlyContinue
+          if ($command -and $command.Source) {
+            $candidates.Add($command.Source)
+          }
+
+          if ($env:USERPROFILE) {
+            $candidates.Add((Join-Path $env:USERPROFILE 'AppData\Roaming\npm\codex.cmd'))
+          }
+
+          if ($env:LOCALAPPDATA) {
+            $candidates.Add((Join-Path $env:LOCALAPPDATA 'npm\codex.cmd'))
+          }
+
+          $resolved = $candidates |
+            Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+            Select-Object -First 1
+
+          if (-not $resolved) {
+            Write-Host "whoami: $(whoami)"
+            Write-Host "USERPROFILE: $env:USERPROFILE"
+            Write-Host "LOCALAPPDATA: $env:LOCALAPPDATA"
+            Write-Host "PATH: $env:PATH"
+            throw "Codex CLI not found for the runner service account. Set repo variable WORKER_CODEX_BIN to the full codex path or make codex available on PATH."
+          }
+
+          Write-Host "Resolved Codex CLI: $resolved"
+          "WORKER_CODEX_BIN=$($resolved -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Verify Codex CLI
         run: |
-          codex --version
-          codex exec --help | Select-String "skip-git"
+          & $env:WORKER_CODEX_BIN --version
+          & $env:WORKER_CODEX_BIN exec --help | Select-String "skip-git"
 
       - name: Prepare local git repo for strict smoke job
         run: |
