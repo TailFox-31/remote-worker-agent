@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
@@ -56,5 +57,40 @@ describe('GitWorkspacePreparer', () => {
     expect(readme).toContain('hello remote worker');
     expect(headCommit).toBe(commit);
     expect(path.basename(prepared.manifestPath)).toBe('job-manifest.json');
+  });
+
+  it('recreates an invalid repo cache before preparing a workspace', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-workspace-'));
+    const { repoPath, commit } = await createSourceRepo(tempDir);
+    const workspaceRoot = path.join(tempDir, 'worker-root');
+    const preparer = new GitWorkspacePreparer(workspaceRoot);
+
+    const repoName = path.basename(repoPath);
+    const repoHash = createHash('sha1').update(repoPath).digest('hex').slice(0, 12);
+    const repoCachePath = path.join(workspaceRoot, '.repo-cache', `${repoName}-${repoHash}`);
+    await mkdir(repoCachePath, { recursive: true });
+    await writeFile(path.join(repoCachePath, 'not-a-git-repo.txt'), 'broken cache\n', 'utf8');
+
+    const job: RemoteWorkerJob = {
+      job_id: 'job-2',
+      workspace_key: 'repo:test',
+      repo_url: repoPath,
+      branch: 'main',
+      base_commit: commit,
+      mode: 'edit',
+      requirements: ['tool:codex'],
+      prompt: 'Recover from invalid cache',
+      target_files: ['README.md'],
+      timeout_sec: 600
+    };
+
+    const prepared = await preparer.prepare(job);
+    const readme = await readFile(path.join(prepared.workspacePath, 'README.md'), 'utf8');
+    const headCommit = await git(['rev-parse', 'HEAD'], prepared.workspacePath);
+    const gitDir = await git(['rev-parse', '--git-dir'], repoCachePath);
+
+    expect(readme).toContain('hello remote worker');
+    expect(headCommit).toBe(commit);
+    expect(gitDir).toBe('.git');
   });
 });

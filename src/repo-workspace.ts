@@ -118,12 +118,30 @@ export class GitWorkspacePreparer implements WorkspacePreparer {
 
   private async ensureRepoCache(repoCachePath: string, repoUrl: string): Promise<void> {
     if (fs.existsSync(repoCachePath)) {
-      await runGit(['remote', 'set-url', 'origin', repoUrl], repoCachePath, this.gitEnv);
-      return;
+      if (await this.isRepoCacheUsable(repoCachePath)) {
+        await runGit(['remote', 'set-url', 'origin', repoUrl], repoCachePath, this.gitEnv);
+        return;
+      }
+
+      await rm(repoCachePath, { recursive: true, force: true });
     }
 
     await mkdir(path.dirname(repoCachePath), { recursive: true });
-    await runGit(['clone', '--no-checkout', repoUrl, repoCachePath], this.rootPath, this.gitEnv);
+    try {
+      await runGit(['clone', '--no-checkout', repoUrl, repoCachePath], this.rootPath, this.gitEnv);
+    } catch (error) {
+      await rm(repoCachePath, { recursive: true, force: true });
+      await runGit(['clone', '--no-checkout', repoUrl, repoCachePath], this.rootPath, this.gitEnv);
+    }
+  }
+
+  private async isRepoCacheUsable(repoCachePath: string): Promise<boolean> {
+    try {
+      await runGit(['rev-parse', '--git-dir'], repoCachePath, this.gitEnv);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async refreshRepoCache(repoCachePath: string, job: RemoteWorkerJob): Promise<void> {
