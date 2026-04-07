@@ -16,7 +16,10 @@ export interface WorkerConfig {
   pollIntervalMs: number;
   workspaceRoot: string;
   sessionStorePath: string;
+  codexBin: string;
+  codexModel?: string;
   gitEnv: NodeJS.ProcessEnv;
+  runtimeEnv: NodeJS.ProcessEnv;
 }
 
 export interface LoadConfigOptions {
@@ -155,6 +158,9 @@ export function loadConfig(
     pollIntervalMs: parsePositiveInteger(mergedEnv.WORKER_POLL_INTERVAL_MS, 5000),
     workspaceRoot,
     sessionStorePath,
-    gitEnv: pickGitEnv(mergedEnv)
+    codexBin: mergedEnv.WORKER_CODEX_BIN?.trim() || 'codex',
+    codexModel: mergedEnv.WORKER_CODEX_MODEL?.trim() || undefined,
+    gitEnv: pickGitEnv(mergedEnv),
+    runtimeEnv: { ...mergedEnv }
   };
 }

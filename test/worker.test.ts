@@ -24,7 +24,9 @@ function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerCo
     pollIntervalMs: 10,
     workspaceRoot,
     sessionStorePath,
-    gitEnv: {}
+    codexBin: 'codex',
+    gitEnv: {},
+    runtimeEnv: {}
   };
 }
 

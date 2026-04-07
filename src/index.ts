@@ -13,7 +13,15 @@ async function main(): Promise<void> {
   const sessionStore = new JsonSessionStore(config.sessionStorePath);
   const workspacePreparer = new GitWorkspacePreparer(config.workspaceRoot, config.gitEnv);
   const executors = new Map([
-    ['codex', new CodexExecutor(config.executionMode)],
+    [
+      'codex',
+      new CodexExecutor({
+        executionMode: config.executionMode,
+        bin: config.codexBin,
+        model: config.codexModel,
+        env: config.runtimeEnv
+      })
+    ],
     ['claude-code', new ClaudeCodeExecutor(config.executionMode)]
   ] as const);
 

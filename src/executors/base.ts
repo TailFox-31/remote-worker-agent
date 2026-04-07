@@ -15,7 +15,7 @@ export interface ExecutorAdapter {
 export abstract class SkeletonExecutor implements ExecutorAdapter {
   constructor(
     readonly provider: SessionProvider,
-    private readonly executionMode: 'dry-run' | 'strict'
+    protected readonly executionMode: 'dry-run' | 'strict'
   ) {}
 
   async run(context: ExecutorRunContext): Promise<ExecutorRunResult> {
