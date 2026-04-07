@@ -70,6 +70,12 @@ jobs:
             $candidates.Add((Join-Path $env:LOCALAPPDATA 'npm\codex.cmd'))
           }
 
+          Get-ChildItem -Path 'C:\Users' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $candidates.Add((Join-Path $_.FullName 'AppData\Roaming\npm\codex.cmd'))
+            $candidates.Add((Join-Path $_.FullName '.local\bin\codex.cmd'))
+            $candidates.Add((Join-Path $_.FullName '.local\bin\codex.exe'))
+          }
+
           $resolved = $candidates |
             Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
             Select-Object -First 1
