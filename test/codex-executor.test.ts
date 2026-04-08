@@ -39,6 +39,11 @@ if (process.env.FAKE_CODEX_MODE === 'fail') {
   process.exit(17);
 }
 
+if (resumeIndex >= 0 && args.includes('-s')) {
+  process.stderr.write(\"error: unexpected argument '-s' found\\n\");
+  process.exit(2);
+}
+
 fs.writeFileSync(path.join(process.cwd(), 'prompt.log'), prompt, 'utf8');
 const gitConfigEnv = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => key.startsWith('GIT_CONFIG_'))
@@ -184,6 +189,8 @@ describe('CodexExecutor', () => {
     expect(result.status).toBe('completed');
     expect(result.result_summary).toBe('RESUMED');
     expect(result.opaque_session_id).toBe('sess-existing-123');
+    const promptLog = await readFile(path.join(workspacePath, 'prompt.log'), 'utf8');
+    expect(promptLog).toContain('Update note.txt and describe the change.');
   });
 
   it('returns a failed result when codex exits non-zero', async () => {

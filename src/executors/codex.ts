@@ -368,13 +368,16 @@ export class CodexExecutor extends SkeletonExecutor {
     const outputFilePath = path.join(tmpDir, 'last-message.txt');
     const args = ['exec'];
     const prompt = buildPrompt(context.job);
+    const resumeSessionId = context.resumeSession?.opaque_session_id;
 
-    if (context.resumeSession?.opaque_session_id) {
-      args.push('resume', context.resumeSession.opaque_session_id);
+    if (resumeSessionId) {
+      args.push('resume', resumeSessionId);
     }
 
     args.push('--skip-git-repo-check', '--json', '-o', outputFilePath);
-    args.push('-s', this.sandbox);
+    if (!resumeSessionId) {
+      args.push('-s', this.sandbox);
+    }
 
     if (this.model) {
       args.push('-m', this.model);
