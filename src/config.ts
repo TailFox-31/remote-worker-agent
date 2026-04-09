@@ -14,6 +14,9 @@ export interface WorkerConfig {
   defaultProvider: SessionProvider;
   executionMode: 'dry-run' | 'strict';
   pollIntervalMs: number;
+  retryInitialDelayMs: number;
+  retryMaxDelayMs: number;
+  attemptHeartbeatRetryCount: number;
   workspaceRoot: string;
   sessionStorePath: string;
   codexBin: string;
@@ -204,6 +207,9 @@ export function loadConfig(
     defaultProvider: parseProvider(mergedEnv.WORKER_DEFAULT_PROVIDER),
     executionMode,
     pollIntervalMs: parsePositiveInteger(mergedEnv.WORKER_POLL_INTERVAL_MS, 5000),
+    retryInitialDelayMs: parsePositiveInteger(mergedEnv.WORKER_RETRY_INITIAL_MS, 1000),
+    retryMaxDelayMs: parsePositiveInteger(mergedEnv.WORKER_RETRY_MAX_MS, 60000),
+    attemptHeartbeatRetryCount: parsePositiveInteger(mergedEnv.WORKER_ATTEMPT_HEARTBEAT_MAX_RETRIES, 3),
     workspaceRoot,
     sessionStorePath,
     codexBin: mergedEnv.WORKER_CODEX_BIN?.trim() || 'codex',

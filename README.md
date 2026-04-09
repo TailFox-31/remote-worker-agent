@@ -77,6 +77,9 @@ npm run start
 - `WORKER_GITHUB_API_BASE_URL` 기본 `https://api.github.com`
 - `WORKER_GITHUB_PR_DRAFT` 기본 `false`
 - `WORKER_POLL_INTERVAL_MS` 기본 `5000`
+- `WORKER_RETRY_INITIAL_MS` 기본 `1000`
+- `WORKER_RETRY_MAX_MS` 기본 `60000`
+- `WORKER_ATTEMPT_HEARTBEAT_MAX_RETRIES` 기본 `3`
 - `WORKER_WORKSPACE_ROOT` 기본 `.workspaces`
   - 내부적으로 `.repo-cache/`에 원격 repo 캐시를 두고, job별 worktree를 생성합니다
 - `WORKER_SESSION_STORE` 기본 `.sessions/store.json`
@@ -87,6 +90,7 @@ npm run start
 
 - `src/control-plane-client.ts`: HTTP client
 - `src/worker.ts`: orchestration loop
+- `src/service-runner.ts`: register/runLoop supervisor + retry/backoff
 - `src/session-store.ts`: session persistence
 - `src/repo-workspace.ts`: git worktree 기반 workspace 준비
 - `src/executors/codex.ts`: 실제 `codex exec` 연동
@@ -163,6 +167,45 @@ completed job=<job_id> summary="..."
 - `jobs.status = completed`
 - `latest_attempt.provider = codex`
 - `artifacts`에 `report`, `stdout`, `stderr`, 변경이 있으면 `patch`
+
+## 장애 복구
+
+worker는 두 계층으로 복구하도록 설계됩니다.
+
+1. 프로세스가 살아있는 동안
+  - `register`/`claim`/`worker heartbeat`/top-level loop 예외는 supervisor가 exponential backoff로 재시도합니다
+  - attempt heartbeat는 transient 오류(408/429/5xx, 네트워크 예외)에 한해 짧게 재시도합니다
+2. 프로세스가 죽은 뒤
+  - Windows 작업 스케줄러 같은 OS 레벨 상시 실행이 필요합니다
+
+## Windows 상시 실행
+
+작업 스케줄러 등록 helper:
+
+- 시작 스크립트: [scripts/windows/start-worker.cmd](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/scripts/windows/start-worker.cmd)
+- 등록 스크립트: [scripts/windows/register-worker-task.ps1](/home/faust/work/TFClaw/data/workspaces/tfclaw_dev3/remote-worker-agent/scripts/windows/register-worker-task.ps1)
+
+권장 방식:
+
+- 같은 사용자 계정으로 실행
+- `사용자가 로그온했는지 여부와 관계없이 실행`
+- `가장 높은 수준의 권한으로 실행`
+- 실패 시 `1분 후 다시 시작`, 시도 `999회`
+
+예시:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\windows\register-worker-task.ps1 -TaskName "RemoteWorkerAgent"
+```
+
+등록 뒤 검증:
+
+```powershell
+Start-ScheduledTask -TaskName "RemoteWorkerAgent"
+Get-ScheduledTask -TaskName "RemoteWorkerAgent" | Get-ScheduledTaskInfo
+Get-Content .\logs\worker.log -Tail 50
+```
 
 ## CI/CD
 

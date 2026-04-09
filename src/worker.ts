@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import type { WorkerConfig } from './config.js';
+import { ControlPlaneHttpError } from './control-plane-client.js';
 import type { PreparedWorkspace, WorkspacePreparer } from './repo-workspace.js';
 import { JsonSessionStore, type SessionRecord } from './session-store.js';
 import type {
@@ -220,12 +221,17 @@ export class RemoteWorkerAgent {
         sessionTouch: Boolean(resumeSession),
         abortController: executionController,
         sendHeartbeat: async (phase, message, sessionTouch) => {
-          const heartbeat = await this.deps.client.heartbeatAttempt(attemptId, leaseToken, {
-            worker_id: this.config.workerId,
-            progress_phase: phase,
-            progress_message: message,
-            session_touch: sessionTouch
-          });
+          const heartbeat = await this.heartbeatAttemptWithRetry(
+            attemptId,
+            leaseToken,
+            {
+              worker_id: this.config.workerId,
+              progress_phase: phase,
+              progress_message: message,
+              session_touch: sessionTouch
+            },
+            executionController.signal
+          );
           this.throwIfCancelled(heartbeat);
         }
       });
@@ -354,6 +360,59 @@ export class RemoteWorkerAgent {
         await this.persistWorkspaceManifest(preparedWorkspace);
       }
     }
+  }
+
+  private async heartbeatAttemptWithRetry(
+    attemptId: string,
+    leaseToken: string,
+    input: {
+      worker_id: string;
+      progress_phase: string;
+      progress_message?: string;
+      session_touch: boolean;
+    },
+    signal?: AbortSignal
+  ): Promise<AttemptHeartbeatResponse> {
+    const maxAttempts = Math.max(1, this.config.attemptHeartbeatRetryCount);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.deps.client.heartbeatAttempt(attemptId, leaseToken, input);
+      } catch (error) {
+        if (!this.shouldRetryAttemptHeartbeat(error) || attempt === maxAttempts) {
+          throw error;
+        }
+
+        const delayMs = this.getRetryDelayMs(attempt);
+        try {
+          await sleep(delayMs, undefined, { signal });
+        } catch (sleepError) {
+          const nodeError = sleepError as NodeJS.ErrnoException;
+          if (nodeError.name !== 'AbortError') {
+            throw sleepError;
+          }
+          throw error;
+        }
+      }
+    }
+
+    throw new Error('Attempt heartbeat retry unexpectedly exhausted');
+  }
+
+  private shouldRetryAttemptHeartbeat(error: unknown): boolean {
+    if (!(error instanceof ControlPlaneHttpError)) {
+      return true;
+    }
+
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  }
+
+  private getRetryDelayMs(attemptNumber: number): number {
+    const exponent = Math.max(0, attemptNumber - 1);
+    return Math.min(
+      this.config.retryMaxDelayMs,
+      this.config.retryInitialDelayMs * 2 ** exponent
+    );
   }
 
   private async uploadArtifacts(

@@ -5,6 +5,7 @@ import { CodexExecutor } from './executors/codex.js';
 import { formatCycleResult } from './output.js';
 import { GitResultPublisher } from './publisher.js';
 import { GitWorkspacePreparer } from './repo-workspace.js';
+import { runAgentService } from './service-runner.js';
 import { JsonSessionStore } from './session-store.js';
 import { RemoteWorkerAgent } from './worker.js';
 
@@ -36,9 +37,8 @@ async function main(): Promise<void> {
     publisher
   });
 
-  await agent.register();
-
   if (process.argv.includes('--once')) {
+    await agent.register();
     const result = await agent.runCycle();
     console.log(formatCycleResult(result));
     return;
@@ -49,9 +49,16 @@ async function main(): Promise<void> {
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
-  await agent.runLoop(controller.signal, (result) => {
-    console.log(formatCycleResult(result));
-  });
+  await runAgentService(
+    config,
+    { agent },
+    {
+      signal: controller.signal,
+      onCycleResult: (result) => {
+        console.log(formatCycleResult(result));
+      }
+    }
+  );
 }
 
 main().catch((error) => {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { WorkerConfig } from '../src/config.js';
+import { ControlPlaneHttpError } from '../src/control-plane-client.js';
 import type { AttemptHeartbeatResponse, JobClaimResponse } from '../src/types.js';
 import { JsonSessionStore } from '../src/session-store.js';
 import { StubWorkspacePreparer } from '../src/repo-workspace.js';
@@ -23,6 +24,9 @@ function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerCo
     defaultProvider: 'codex',
     executionMode: 'dry-run',
     pollIntervalMs: 10,
+    retryInitialDelayMs: 1,
+    retryMaxDelayMs: 10,
+    attemptHeartbeatRetryCount: 3,
     workspaceRoot,
     sessionStorePath,
     codexBin: 'codex',
@@ -401,6 +405,62 @@ describe('RemoteWorkerAgent', () => {
       jobId: 'job-1'
     });
     expect(heartbeatAttempt.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('retries transient attempt heartbeat failures before succeeding', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-heartbeat-retry-'));
+    const sessionStorePath = path.join(tempDir, 'sessions.json');
+    const workspaceRoot = path.join(tempDir, 'workspaces');
+    const config = createConfig(sessionStorePath, workspaceRoot);
+    const heartbeatAttempt = vi
+      .fn<() => Promise<AttemptHeartbeatResponse>>()
+      .mockResolvedValueOnce({
+        accepted: true,
+        lease_expires_at: '2026-04-07T00:00:30Z',
+        cancel_requested: false
+      })
+      .mockRejectedValueOnce(new ControlPlaneHttpError(502, { error: 'bad gateway' }))
+      .mockRejectedValueOnce(new ControlPlaneHttpError(502, { error: 'bad gateway' }))
+      .mockResolvedValue({
+        accepted: true,
+        lease_expires_at: '2026-04-07T00:00:30Z',
+        cancel_requested: false
+      });
+
+    const agent = new RemoteWorkerAgent(config, {
+      client: {
+        registerWorker: vi.fn(async () => ({
+          worker_id: 'worker-a',
+          status: 'idle',
+          heartbeat_interval_sec: 15,
+          lease_ttl_sec: 45
+        })),
+        heartbeatWorker: vi.fn(async () => ({
+          accepted: true,
+          server_time: '2026-04-07T00:00:00Z',
+          next_heartbeat_sec: 15,
+          drain_requested: false
+        })),
+        claimJob: vi.fn(async () => createClaim()),
+        startAttempt: vi.fn(async () => ({ status: 'running' })),
+        heartbeatAttempt,
+        completeAttempt: vi.fn(async () => ({ job_status: 'completed' })),
+        failAttempt: vi.fn(async () => ({ job_status: 'failed' })),
+        cancelAttempt: vi.fn(async () => ({ job_status: 'cancelled' })),
+        uploadArtifact: vi.fn(async () => ({ artifact_id: 'artifact-1' }))
+      },
+      sessionStore: new JsonSessionStore(sessionStorePath),
+      workspacePreparer: new StubWorkspacePreparer(workspaceRoot),
+      executors: new Map([['codex', new FakeExecutor()]])
+    });
+
+    const result = await agent.runCycle();
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      jobId: 'job-1'
+    });
+    expect(heartbeatAttempt).toHaveBeenCalledTimes(4);
   });
 
   it('merges publish results into completion output and uploads publish artifacts', async () => {

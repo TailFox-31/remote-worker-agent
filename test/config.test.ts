@@ -36,6 +36,9 @@ describe('loadConfig', () => {
       maxConcurrency: 2,
       defaultProvider: 'codex',
       executionMode: 'strict',
+      retryInitialDelayMs: 1000,
+      retryMaxDelayMs: 60000,
+      attemptHeartbeatRetryCount: 3,
       codexBin: 'codex',
       codexSandbox: 'workspace-write',
       publishMode: 'artifact',
@@ -170,5 +173,28 @@ describe('loadConfig', () => {
     expect(config.githubToken).toBe('github-token');
     expect(config.githubApiBaseUrl).toBe('https://ghe.example.test/api/v3');
     expect(config.githubPrDraft).toBe(true);
+  });
+
+  it('allows worker retry settings overrides', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-config-retry-'));
+
+    await writeFile(
+      path.join(tempDir, '.env'),
+      [
+        'CONTROL_PLANE_BASE_URL=http://127.0.0.1:8787',
+        'CONTROL_PLANE_TOKEN=file-token',
+        'WORKER_ID=file-worker',
+        'WORKER_RETRY_INITIAL_MS=2500',
+        'WORKER_RETRY_MAX_MS=45000',
+        'WORKER_ATTEMPT_HEARTBEAT_MAX_RETRIES=5'
+      ].join('\n'),
+      'utf8'
+    );
+
+    const config = loadConfig({} as NodeJS.ProcessEnv, { cwd: tempDir });
+
+    expect(config.retryInitialDelayMs).toBe(2500);
+    expect(config.retryMaxDelayMs).toBe(45000);
+    expect(config.attemptHeartbeatRetryCount).toBe(5);
   });
 });
