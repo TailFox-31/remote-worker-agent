@@ -420,6 +420,10 @@ export class RemoteWorkerAgent {
     claim: JobClaimResponse,
     provider: SessionProvider
   ): Promise<SessionResume | null> {
+    if (claim.session.session_policy === 'fresh') {
+      return null;
+    }
+
     if (claim.session.resume) {
       return claim.session.resume;
     }

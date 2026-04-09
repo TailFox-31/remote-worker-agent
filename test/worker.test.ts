@@ -38,7 +38,10 @@ function createConfig(sessionStorePath: string, workspaceRoot: string): WorkerCo
   };
 }
 
-function createClaim(overrides: Partial<JobClaimResponse['attempt']> = {}): JobClaimResponse {
+function createClaim(
+  overrides: Partial<JobClaimResponse['attempt']> = {},
+  sessionOverrides: Partial<JobClaimResponse['session']> = {},
+): JobClaimResponse {
   return {
     job: {
       job_id: 'job-1',
@@ -62,7 +65,8 @@ function createClaim(overrides: Partial<JobClaimResponse['attempt']> = {}): JobC
     session: {
       session_key: 'discord:room:1',
       session_policy: 'prefer_reuse',
-      resume: null
+      resume: null,
+      ...sessionOverrides
     }
   };
 }
@@ -226,6 +230,76 @@ describe('RemoteWorkerAgent', () => {
       jobId: 'job-1'
     });
     expect(cancelAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores resume payloads and stored sessions for fresh jobs', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'remote-worker-agent-fresh-'));
+    const sessionStorePath = path.join(tempDir, 'sessions.json');
+    const workspaceRoot = path.join(tempDir, 'workspaces');
+    const config = createConfig(sessionStorePath, workspaceRoot);
+    const sessionStore = new JsonSessionStore(sessionStorePath);
+    await sessionStore.set({
+      session_key: 'discord:room:1',
+      provider: 'codex',
+      opaque_session_id: 'sess-local-store',
+      updated_at: new Date().toISOString(),
+    });
+
+    const startAttempt = vi.fn(async () => ({ status: 'running' }));
+
+    const agent = new RemoteWorkerAgent(config, {
+      client: {
+        registerWorker: vi.fn(async () => ({
+          worker_id: 'worker-a',
+          status: 'idle',
+          heartbeat_interval_sec: 15,
+          lease_ttl_sec: 45
+        })),
+        heartbeatWorker: vi.fn(async () => ({
+          accepted: true,
+          server_time: '2026-04-07T00:00:00Z',
+          next_heartbeat_sec: 15,
+          drain_requested: false
+        })),
+        claimJob: vi.fn(async () =>
+          createClaim(
+            {},
+            {
+              session_policy: 'fresh',
+              resume: { provider: 'codex', opaque_session_id: 'sess-server-resume' },
+            },
+          ),
+        ),
+        startAttempt,
+        heartbeatAttempt: vi.fn(
+          async (): Promise<AttemptHeartbeatResponse> => ({
+            accepted: true,
+            lease_expires_at: '2026-04-07T00:00:30Z',
+            cancel_requested: false
+          })
+        ),
+        completeAttempt: vi.fn(async () => ({ job_status: 'completed' })),
+        failAttempt: vi.fn(async () => ({ job_status: 'failed' })),
+        cancelAttempt: vi.fn(async () => ({ job_status: 'cancelled' })),
+        uploadArtifact: vi.fn(async () => ({ artifact_id: 'artifact-1' }))
+      },
+      sessionStore,
+      workspacePreparer: new StubWorkspacePreparer(workspaceRoot),
+      executors: new Map([['codex', new FakeExecutor()]])
+    });
+
+    const result = await agent.runCycle();
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      jobId: 'job-1'
+    });
+    expect(startAttempt).toHaveBeenCalledWith('attempt-1', 'lease-1', {
+      worker_id: 'worker-a',
+      provider: 'codex',
+      opaque_session_id: 'codex:job-1',
+      session_reused: false
+    });
   });
 
   it('fails the attempt instead of crashing when startAttempt throws', async () => {
