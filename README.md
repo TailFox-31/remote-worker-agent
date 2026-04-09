@@ -199,6 +199,17 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\windows\register-worker-task.ps1 -TaskName "RemoteWorkerAgent"
 ```
 
+주의:
+
+- `Password` 로그온 타입은 Windows Hello PIN이 아니라 **실제 Windows 계정 비밀번호**가 필요합니다
+- 계정 비밀번호가 없거나 PIN만 쓰는 환경이면 fallback으로 아래처럼 등록할 수 있습니다
+
+```powershell
+.\scripts\windows\register-worker-task.ps1 -TaskName "RemoteWorkerAgent" -InteractiveOnly
+```
+
+- `InteractiveOnly`는 사용자가 로그인 중일 때만 동작하므로, 상시 실행 관점에서는 임시 우회입니다
+
 등록 뒤 검증:
 
 ```powershell
